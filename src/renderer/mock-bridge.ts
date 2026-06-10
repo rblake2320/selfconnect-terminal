@@ -20,6 +20,9 @@ import type {
   SlashResult,
   ResumeResult,
   UiState,
+  SessionKnowledge,
+  ContextBlobRef,
+  MetabolicState,
 } from '../shared/contracts';
 import type { SelfConnectApi } from './selfconnect.d';
 
@@ -88,6 +91,20 @@ interface SimState {
   todos: TodoItem[];
   sessions: SessionSummary[];
   peers: A2aPeer[];
+  // --- v3: Context Economy ---
+  hotTokens: number;
+  warmTokens: number;
+  pinnedTokens: number;
+  dedupHits: number;
+  compactions: number;
+  tokensNotResent: number;
+  cacheSavingsUsd: number;
+  distillationSavingsUsd: number;
+  freshInputTokens: number;
+  totalInputTokens: number;
+  knowledge: SessionKnowledge;
+  pinned: ContextBlobRef[];
+  startedAtMs: number;
 }
 
 const sim: SimState = {
@@ -140,6 +157,28 @@ const sim: SimState = {
     { peer: 'researcher', lastSeenAt: Date.now() - 5_000, sent: 3, received: 4, chainOk: true, allowlisted: true },
     { peer: 'planner', lastSeenAt: Date.now() - 12_000, sent: 1, received: 1, chainOk: true, allowlisted: true },
   ],
+  hotTokens: 1800,
+  warmTokens: 0,
+  pinnedTokens: 0,
+  dedupHits: 0,
+  compactions: 0,
+  tokensNotResent: 0,
+  cacheSavingsUsd: 0,
+  distillationSavingsUsd: 0,
+  freshInputTokens: 1800,
+  totalInputTokens: 1800,
+  knowledge: {
+    decisions: ['Routed all distillation to the local Ollama model ($0)'],
+    facts: ['Ledger hash-chain verified intact at boot'],
+    fileStates: { 'src/daemon/daemon.ts': 'Context Economy engine wired (v3)' },
+    openQuestions: [],
+    todos: ['Demo A2A peers'],
+    namedEntities: ['gemma3', 'claude-sonnet-4-5'],
+    sourceBlobs: [],
+    updatedAt: Date.now(),
+  },
+  pinned: [],
+  startedAtMs: Date.now(),
 };
 
 const busHandlers = new Set<(evt: BusEvent) => void>();
@@ -171,7 +210,22 @@ function contextSnapshot(): ContextSnapshot {
   const pressure = Math.min(100, (sim.usedTokens / sim.maxTokens) * 100);
   const level =
     pressure >= 90 ? 'migrate' : pressure >= 80 ? 'danger' : pressure >= 60 ? 'warn' : 'normal';
-  return { usedTokens: sim.usedTokens, maxTokens: sim.maxTokens, pressure, level };
+  return {
+    usedTokens: sim.usedTokens,
+    maxTokens: sim.maxTokens,
+    pressure,
+    level,
+    hotTokens: sim.hotTokens,
+    warmTokens: sim.warmTokens,
+    pinnedTokens: sim.pinnedTokens,
+    dedupHits: sim.dedupHits,
+    compactions: sim.compactions,
+  };
+}
+
+function contextEfficiencyPct(): number {
+  if (sim.totalInputTokens <= 0) return 100;
+  return (sim.freshInputTokens / sim.totalInputTokens) * 100;
 }
 
 function costSnapshot(): CostSnapshot {
@@ -180,6 +234,19 @@ function costSnapshot(): CostSnapshot {
     avoidedSpendUsd: sim.avoidedSpendUsd,
     perCallCapUsd: 0.25,
     last: sim.lastCost,
+    tokensNotResent: sim.tokensNotResent,
+    cacheSavingsUsd: sim.cacheSavingsUsd,
+    distillationSavingsUsd: sim.distillationSavingsUsd,
+    contextEfficiencyPct: contextEfficiencyPct(),
+  };
+}
+
+function metabolicSnapshot(): MetabolicState {
+  const pressure = Math.min(100, (sim.usedTokens / sim.maxTokens) * 100);
+  return {
+    contextRemainingPct: Math.max(0, 100 - pressure),
+    budgetRemainingUsd: Math.max(0, 0.25 - sim.sessionSpendUsd),
+    elapsedMs: Date.now() - sim.startedAtMs,
   };
 }
 
@@ -239,6 +306,9 @@ function snapshot(): UiState {
     todos: sim.todos,
     sessions: sim.sessions,
     peers: sim.peers,
+    knowledge: sim.knowledge,
+    metabolic: metabolicSnapshot(),
+    pinned: sim.pinned,
   };
 }
 
@@ -388,6 +458,11 @@ const SLASH_HELP = [
   '  /tools                list governed tools',
   '  /todo list            manage the todo list',
   '  /agent-mode <mode>    set permission mode (plan|ask|auto)',
+  '  /context              show context economy breakdown (hot/warm/pinned/dedup)',
+  '  /compact              force context compaction (hot -> warm)',
+  '  /knowledge            show distilled session knowledge (WARM tier)',
+  '  /playbooks <sit>      load matching playbooks',
+  '  /limits               what this harness/model cannot do',
   '  /clear                clear the terminal view',
 ].join('\n');
 
@@ -395,7 +470,38 @@ const MOCK_TOOLS = [
   'read', 'write', 'edit', 'glob', 'grep', 'bash', 'web_fetch', 'web_search',
   'task', 'todo', 'apply_patch', 'ask_user', 'ledger_verify', 'ledger_query',
   'cost_report', 'redact_text', 'review_request', 'a2a_send', 'mcp_call',
-  'session_list', 'memory_read', 'memory_write',
+  'session_list', 'memory_read', 'memory_write', 'context_request',
+  'scratchpad_write', 'scratchpad_read', 'introspect', 'metabolic', 'limits',
+  'crystallize_playbook', 'load_playbooks', 'record_failure',
+];
+
+const MOCK_PLAYBOOKS: { situation: string; title: string; steps: string[] }[] = [
+  {
+    situation: 'typecheck fails after schema change',
+    title: 'Propagate Zod schema fields to all literals',
+    steps: [
+      'Add the field to the schema with a sane .default()',
+      'Update every hand-built object literal (z.infer keeps defaulted fields required)',
+      'Re-run tsc -p each tsconfig until clean',
+    ],
+  },
+];
+
+const MOCK_FAILURES: { signature: string; whatNotToDo: string; whatWorkedInstead: string }[] = [
+  {
+    signature: 'distillation needs network',
+    whatNotToDo: 'Assume Ollama is always reachable before distilling a turn',
+    whatWorkedInstead: 'Fall back to the deterministic $0 heuristic extractor',
+  },
+];
+
+const LIMITS_CANNOT = [
+  'open a GUI window or use a display server',
+  'use a GPU for inference',
+  'make cloud calls while LOCAL_ONLY is ON',
+  'run bash that mutates state without an approval in ask mode',
+  'read provider API keys (they live only in the daemon)',
+  'persist files outside the ./data directory',
 ];
 
 function mockSlash(line: string): SlashResult {
@@ -491,6 +597,75 @@ function mockSlash(line: string): SlashResult {
       }
       return { ok: true, output: `permission mode is ${sim.permissionMode}` };
     }
+    case 'context': {
+      const c = contextSnapshot();
+      const cost = costSnapshot();
+      return {
+        ok: true,
+        output: [
+          `Context economy (${c.pressure.toFixed(1)}% / ${c.level}):`,
+          `  hot=${c.hotTokens}  warm=${c.warmTokens}  pinned=${c.pinnedTokens}  total=${c.usedTokens}/${c.maxTokens}`,
+          `  dedup hits=${c.dedupHits}  compactions=${c.compactions}`,
+          `  tokens NOT resent=${cost.tokensNotResent}  cache savings=$${cost.cacheSavingsUsd.toFixed(4)}  distill savings=$${cost.distillationSavingsUsd.toFixed(4)}`,
+          `  Context Efficiency=${cost.contextEfficiencyPct.toFixed(1)}%`,
+        ].join('\n'),
+      };
+    }
+    case 'compact': {
+      const moved = Math.max(0, sim.hotTokens - 1200);
+      const warmAdded = Math.round(moved * 0.15);
+      sim.hotTokens -= moved;
+      sim.warmTokens += warmAdded;
+      sim.usedTokens = sim.hotTokens + sim.warmTokens + sim.pinnedTokens;
+      sim.compactions += 1;
+      sim.tokensNotResent += moved - warmAdded;
+      sim.distillationSavingsUsd += ((moved - warmAdded) / 1_000_000) * 3;
+      emit('context.compacted', { movedTokens: moved, warmAdded, reason: 'manual /compact' });
+      emit('context.update', contextSnapshot());
+      emit('cost.update', costSnapshot());
+      return {
+        ok: true,
+        output: `compacted hot -> warm: moved ${moved} tokens (kept ${warmAdded} distilled), ${moved - warmAdded} tokens will not be resent`,
+      };
+    }
+    case 'pin': {
+      if (!rest) return { ok: false, output: 'usage: /pin <hash>' };
+      return { ok: true, output: `pinned ${rest} (survives migration)` };
+    }
+    case 'unpin': {
+      if (!rest) return { ok: false, output: 'usage: /unpin <hash>' };
+      return { ok: true, output: `unpinned ${rest}` };
+    }
+    case 'knowledge': {
+      const k = sim.knowledge;
+      return {
+        ok: true,
+        output: [
+          'Session knowledge (WARM):',
+          `  decisions: ${k.decisions.length}  facts: ${k.facts.length}  files: ${Object.keys(k.fileStates).length}`,
+          `  open questions: ${k.openQuestions.length}  todos: ${k.todos.length}  entities: ${k.namedEntities.length}`,
+        ].join('\n'),
+      };
+    }
+    case 'playbooks': {
+      if (!rest) return { ok: false, output: 'usage: /playbooks <situation>' };
+      emit('playbook.loaded', { situation: rest, matched: MOCK_PLAYBOOKS.length });
+      const rows = MOCK_PLAYBOOKS.flatMap((p) => [
+        `  ▸ ${p.title}`,
+        ...p.steps.map((s) => `      - ${s}`),
+      ]);
+      const warn = MOCK_FAILURES[0];
+      return {
+        ok: true,
+        output: [
+          `Playbooks matching "${rest}":`,
+          ...rows,
+          `⚠ seen before: ${warn.whatNotToDo} — instead: ${warn.whatWorkedInstead}`,
+        ].join('\n'),
+      };
+    }
+    case 'limits':
+      return { ok: true, output: ['This harness/model CANNOT:', ...LIMITS_CANNOT.map((l) => `  - ${l}`)].join('\n') };
     case 'clear':
       return { ok: true, output: '', clear: true };
     default:
@@ -522,10 +697,48 @@ function handlePtyInput(data: string): void {
 // ---------------------------------------------------------------------------
 
 function startStreaming(): void {
-  // Context pressure climbs steadily through normal -> warn -> danger and loops.
+  // Context pressure climbs through normal -> warn -> danger; at danger the
+  // gauge actuates an auto-compaction (hot -> warm), then the demo loops.
   setInterval(() => {
-    sim.usedTokens += 2600 + Math.floor(Math.random() * 1800);
-    if (sim.usedTokens > sim.maxTokens * 0.97) sim.usedTokens = 1800; // loop the demo
+    const grew = 2600 + Math.floor(Math.random() * 1800);
+    sim.hotTokens += grew;
+    sim.freshInputTokens += grew;
+    sim.totalInputTokens += grew;
+    sim.usedTokens = sim.hotTokens + sim.warmTokens + sim.pinnedTokens;
+
+    // Roughly 1 in 3 turns re-references an already-seen blob: dedup it.
+    if (Math.random() < 0.33) {
+      const saved = 600 + Math.floor(Math.random() * 1400);
+      sim.dedupHits += 1;
+      sim.tokensNotResent += saved;
+      sim.cacheSavingsUsd += (saved / 1_000_000) * 3;
+      sim.totalInputTokens += saved; // counted as total, but not fresh
+      emit('context.dedup', { hash: fakeHash(sim.dedupHits).slice(0, 16), tokensSaved: saved });
+      emit('cost.update', costSnapshot());
+    }
+
+    const pressure = (sim.usedTokens / sim.maxTokens) * 100;
+    if (pressure >= 80) {
+      // Auto-compact oldest hot -> warm (15% distilled retention).
+      const moved = Math.max(0, sim.hotTokens - 1200);
+      const warmAdded = Math.round(moved * 0.15);
+      sim.hotTokens -= moved;
+      sim.warmTokens += warmAdded;
+      sim.compactions += 1;
+      sim.tokensNotResent += moved - warmAdded;
+      sim.distillationSavingsUsd += ((moved - warmAdded) / 1_000_000) * 3;
+      sim.usedTokens = sim.hotTokens + sim.warmTokens + sim.pinnedTokens;
+      sim.knowledge = { ...sim.knowledge, updatedAt: Date.now() };
+      emit('context.compacted', { movedTokens: moved, warmAdded, reason: 'auto: danger threshold' });
+      emit('context.distilled', { distilledTokens: warmAdded, usedModel: 'gemma3' });
+      emit('cost.update', costSnapshot());
+    }
+    if (sim.usedTokens > sim.maxTokens * 0.97) {
+      // Loop the demo from a fresh hot window.
+      sim.hotTokens = 1800;
+      sim.warmTokens = 0;
+      sim.usedTokens = 1800;
+    }
     emit('context.update', contextSnapshot());
   }, 1600);
 

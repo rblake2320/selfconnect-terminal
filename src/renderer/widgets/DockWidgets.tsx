@@ -39,6 +39,20 @@ export function CostKernelWidget(props: { cost: CostSnapshot }): React.JSX.Eleme
         <span>Per-call cap</span>
         <span>${cost.perCallCapUsd.toFixed(2)}</span>
       </div>
+      <div className="kv">
+        <span>Context efficiency</span>
+        <span className="good">{cost.contextEfficiencyPct.toFixed(1)}%</span>
+      </div>
+      <div className="kv">
+        <span>Tokens not resent</span>
+        <span className="good">{cost.tokensNotResent.toLocaleString()}</span>
+      </div>
+      <div className="kv">
+        <span>Cache / distill savings</span>
+        <span className="good">
+          ${cost.cacheSavingsUsd.toFixed(4)} / ${cost.distillationSavingsUsd.toFixed(4)}
+        </span>
+      </div>
       {cost.last && (
         <div className="kv">
           <span>
@@ -64,6 +78,18 @@ export function ContextGaugeWidget(props: { context: ContextSnapshot }): React.J
         <span>{context.level.toUpperCase()}</span>
         <span>
           {context.usedTokens} / {context.maxTokens} ({context.pressure.toFixed(0)}%)
+        </span>
+      </div>
+      <div className="kv">
+        <span>hot / warm / pinned</span>
+        <span>
+          {context.hotTokens} / {context.warmTokens} / {context.pinnedTokens}
+        </span>
+      </div>
+      <div className="kv">
+        <span>dedup hits / compactions</span>
+        <span className="good">
+          {context.dedupHits} / {context.compactions}
         </span>
       </div>
     </Card>

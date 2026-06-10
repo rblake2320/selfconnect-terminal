@@ -84,6 +84,9 @@ export function App(): React.JSX.Element {
         {state && (
           <span className="identity mono">
             {state.identity.sessionId.slice(0, 14)}… · agent {state.identity.agentId.slice(0, 16)}…
+            {' · '}ctx {state.metabolic.contextRemainingPct.toFixed(0)}% · $
+            {state.metabolic.budgetRemainingUsd.toFixed(2)} left ·{' '}
+            {Math.round(state.metabolic.elapsedMs / 1000)}s
           </span>
         )}
         <button className="btn btn-small" onClick={() => setShowFeed((v) => !v)}>
