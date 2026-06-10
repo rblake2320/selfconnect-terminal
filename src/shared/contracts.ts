@@ -65,6 +65,24 @@ export const EventTypeSchema = z.enum([
   'todo.update',
   'hook.fired',
   'permission.mode',
+  // --- v3: context economy ---
+  'context.stored',
+  'context.dedup',
+  'context.distilled',
+  'context.compacted',
+  'context.migrated',
+  'context.pinned',
+  'context.unpinned',
+  'context.requested',
+  // --- v3: agent's own asks ---
+  'playbook.crystallized',
+  'playbook.loaded',
+  'failure.recorded',
+  'failure.matched',
+  'scratchpad.write',
+  'scratchpad.read',
+  'introspect.query',
+  'limits.loaded',
 ]);
 export type EventType = z.infer<typeof EventTypeSchema>;
 
@@ -165,6 +183,15 @@ export const CostSnapshotSchema = z.object({
   avoidedSpendUsd: z.number().nonnegative(),
   perCallCapUsd: z.number().nonnegative(),
   last: CostEstimateSchema.nullable(),
+  // --- v3: Context Economy savings accounting ---
+  /** Tokens that were NOT resent because their blob was already seen by the model. */
+  tokensNotResent: z.number().nonnegative().default(0),
+  /** USD saved by prompt-cache hits + dedup (priced at baseline input rate). */
+  cacheSavingsUsd: z.number().nonnegative().default(0),
+  /** USD saved by running distillation on the local model instead of cloud. */
+  distillationSavingsUsd: z.number().nonnegative().default(0),
+  /** useful-new-tokens / total-tokens, as a 0..100 percentage. The screenshot number. */
+  contextEfficiencyPct: z.number().min(0).max(100).default(100),
 });
 export type CostSnapshot = z.infer<typeof CostSnapshotSchema>;
 
@@ -180,6 +207,14 @@ export const ContextSnapshotSchema = z.object({
   maxTokens: z.number().positive(),
   pressure: z.number().min(0).max(100),
   level: ContextLevelSchema,
+  // --- v3: tier breakdown (the gauge becomes an actuator) ---
+  hotTokens: z.number().nonnegative().default(0),
+  warmTokens: z.number().nonnegative().default(0),
+  pinnedTokens: z.number().nonnegative().default(0),
+  /** Count of dedup hits (blobs sent as ref+digest instead of full bytes). */
+  dedupHits: z.number().int().nonnegative().default(0),
+  /** Number of auto-compaction events this session. */
+  compactions: z.number().int().nonnegative().default(0),
 });
 export type ContextSnapshot = z.infer<typeof ContextSnapshotSchema>;
 
@@ -381,6 +416,98 @@ export const TodoItemSchema = z.object({
 export type TodoItem = z.infer<typeof TodoItemSchema>;
 
 // ---------------------------------------------------------------------------
+// v3: Context Economy — content-addressed store, tiered memory, knowledge
+// ---------------------------------------------------------------------------
+
+/** Kinds of context artifact tracked by the content-addressed store. */
+export const ContextBlobKindSchema = z.enum([
+  'file',
+  'scrollback',
+  'diff',
+  'doc',
+  'knowledge',
+  'other',
+]);
+export type ContextBlobKind = z.infer<typeof ContextBlobKindSchema>;
+
+/** Metadata for a stored blob (the bytes live in ./data/context-store/<hash>). */
+export const ContextBlobRefSchema = z.object({
+  hash: z.string(),
+  kind: ContextBlobKindSchema,
+  /** Human label / source path. */
+  source: z.string(),
+  bytes: z.number().int().nonnegative(),
+  tokens: z.number().int().nonnegative(),
+  /** 3-line digest sent in place of full bytes once the model has seen the blob. */
+  digest: z.string(),
+  /** Ledger event ids that produced this blob (COLD-tier provenance). */
+  provenance: z.array(z.string()),
+  pinned: z.boolean().default(false),
+});
+export type ContextBlobRef = z.infer<typeof ContextBlobRefSchema>;
+
+/**
+ * Structured incremental session memory (WARM tier). Distilled from each turn
+ * by the LOCAL model so it costs $0 and never leaves the machine. Persisted in
+ * the session snapshot; loaded instantly on resume (resume re-reads NOTHING).
+ */
+export const SessionKnowledgeSchema = z.object({
+  decisions: z.array(z.string()).default([]),
+  facts: z.array(z.string()).default([]),
+  /** path -> one-line state summary. */
+  fileStates: z.record(z.string()).default({}),
+  openQuestions: z.array(z.string()).default([]),
+  todos: z.array(z.string()).default([]),
+  namedEntities: z.array(z.string()).default([]),
+  /** Blob hashes whose facts were distilled here (rehydration provenance). */
+  sourceBlobs: z.array(z.string()).default([]),
+  updatedAt: z.number().int().nonnegative().default(0),
+});
+export type SessionKnowledge = z.infer<typeof SessionKnowledgeSchema>;
+
+/** A crystallized, reusable playbook (E1). */
+export const PlaybookSchema = z.object({
+  hash: z.string(),
+  /** Short signature of the situation this playbook applies to. */
+  situation: z.string(),
+  title: z.string(),
+  steps: z.array(z.string()),
+  pitfalls: z.array(z.string()).default([]),
+  provenance: z.array(z.string()).default([]),
+  version: z.number().int().positive().default(1),
+  createdAt: z.number().int().nonnegative().default(0),
+});
+export type Playbook = z.infer<typeof PlaybookSchema>;
+
+/** A ledger-derived anti-pattern (E2). */
+export const FailureRecordSchema = z.object({
+  hash: z.string(),
+  /** Signature used to match a recurring situation. */
+  signature: z.string(),
+  whatNotToDo: z.string(),
+  whatWorkedInstead: z.string(),
+  provenance: z.array(z.string()).default([]),
+  createdAt: z.number().int().nonnegative().default(0),
+});
+export type FailureRecord = z.infer<typeof FailureRecordSchema>;
+
+/** Machine-readable manifest of what this harness/model pair CANNOT do (E10). */
+export const LimitsManifestSchema = z.object({
+  cannot: z.array(z.string()),
+  blockedDomains: z.array(z.string()).default([]),
+  notes: z.array(z.string()).default([]),
+});
+export type LimitsManifest = z.infer<typeof LimitsManifestSchema>;
+
+/** Cheap readable resource state the model can feel (E9). */
+export const MetabolicStateSchema = z.object({
+  contextRemainingPct: z.number().min(0).max(100),
+  budgetRemainingUsd: z.number(),
+  elapsedMs: z.number().int().nonnegative(),
+});
+export type MetabolicState = z.infer<typeof MetabolicStateSchema>;
+
+// ---------------------------------------------------------------------------
 // v2: Sessions
 // ---------------------------------------------------------------------------
 
@@ -394,9 +521,14 @@ export const SessionSummarySchema = z.object({
 });
 export type SessionSummary = z.infer<typeof SessionSummarySchema>;
 
-/** Persisted daemon snapshot (atomic-written to ./data/sessions/<id>.json). */
+/**
+ * Persisted daemon snapshot (atomic-written to ./data/sessions/<id>.json).
+ * v3 adds the WARM-tier SessionKnowledge + content-addressed blob refs so a
+ * resume re-reads NOTHING. `version` accepts 2 or 3 for backward-compatible
+ * reads; new fields default when absent (an old v2 file still loads).
+ */
 export const SessionSnapshotSchema = z.object({
-  version: z.literal(2),
+  version: z.union([z.literal(2), z.literal(3)]),
   sessionId: z.string(),
   startedAt: z.number().int().nonnegative(),
   lastActiveAt: z.number().int().nonnegative(),
@@ -408,6 +540,10 @@ export const SessionSnapshotSchema = z.object({
   permissionMode: PermissionModeSchema,
   todos: z.array(TodoItemSchema),
   scrollback: z.array(z.string()),
+  // --- v3 ---
+  knowledge: SessionKnowledgeSchema.optional(),
+  blobs: z.array(ContextBlobRefSchema).default([]),
+  ancestorRunId: z.string().optional(),
 });
 export type SessionSnapshot = z.infer<typeof SessionSnapshotSchema>;
 
@@ -494,5 +630,9 @@ export const UiStateSchema = z.object({
   todos: z.array(TodoItemSchema),
   sessions: z.array(SessionSummarySchema),
   peers: z.array(A2aPeerSchema),
+  // --- v3 ---
+  knowledge: SessionKnowledgeSchema,
+  metabolic: MetabolicStateSchema,
+  pinned: z.array(ContextBlobRefSchema).default([]),
 });
 export type UiState = z.infer<typeof UiStateSchema>;
