@@ -3,15 +3,17 @@
 A copy-pasteable runbook for a **first-time native launch** of the real Electron
 app + real daemon on a fresh Windows 11 machine. No mocks.
 
-> **Honesty note.** This build was developed and its 236-test suite was run on
-> **Linux**. The Windows launch is **first-time native validation** — the parts
-> that are platform-specific (the `node-pty` native rebuild against the Electron
-> ABI, ConPTY-backed shell spawning, Electron windowing/sandbox) have **not** been
-> exercised from this development environment. Everywhere below that something
-> could not be verified from Linux, it is flagged with **[UNVERIFIED ON WINDOWS]**.
-> The RTX 5090 is **not used by this app** for inference — model inference is done
-> by **Ollama** (local) or a cloud provider; the GPU matters only insofar as
-> Ollama uses it. There is no CUDA/GPU code path in SelfConnect itself.
+> **Status note.** This build was developed on **Linux**, but the first real
+> Windows 11 run (Node v24, VS 2022 BuildTools, RTX 5090 box) has now happened.
+> The following are **VERIFIED ON WINDOWS**: `npm install` (via a C: cache),
+> `node-pty` rebuilt against the **Electron 31 ABI**, a real **ConPTY smoke test**
+> (`NODE_PTY_OK ... sawData=true`), and **236/236 tests passing natively**. Six
+> first-run problems were found and all have durable fixes now in the repo — see
+> `docs/WINDOWS-FINDINGS.md` and the Troubleshooting section below. Anything still
+> not exercised from any machine is flagged **[UNVERIFIED ON WINDOWS]** (e.g. the
+> Electron *window/GUI* launch itself). The RTX 5090 is **not used by this app**
+> for inference — inference is **Ollama** (local) or a cloud provider; there is no
+> CUDA/GPU code path in SelfConnect itself.
 
 ---
 
@@ -70,8 +72,12 @@ git --version
 git clone https://github.com/rblake2320/selfconnect-terminal
 cd selfconnect-terminal
 
-# If PowerShell blocks the script:
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+# The script does NOT require -ExecutionPolicy Bypass. If PowerShell blocks it,
+# unblock just this file (no policy change needed):
+Unblock-File scripts\setup-windows.ps1
+# ...or scope a milder policy to this process only:
+#   Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned
+# ...or run the steps manually (each is an ordinary npm/npx command).
 
 pwsh -File scripts/setup-windows.ps1
 ```
@@ -79,24 +85,29 @@ pwsh -File scripts/setup-windows.ps1
 `setup-windows.ps1` will, in order:
 
 1. **Check prerequisites** — Node >= 20, npm, Python, and the MSVC C++ toolchain
-   (via `vswhere`). It fails fast with an actionable message if Node/Python are
-   missing, and warns (does not hard-fail) if it cannot confirm MSVC, because the
-   rebuild step will surface the real compiler error.
-2. `npm install`
-3. Create `.env` from `.env.example` (only if `.env` does not already exist).
-4. Create the `./data` runtime directories (ledger, sessions, checkpoints, keys).
-5. `npx electron-rebuild -f -w node-pty` — rebuild the native addon against the
-   **Electron 31** ABI, then **verify it actually loads** by `require()`-ing
-   `node-pty` inside Electron.
+   (via `vswhere`). Fails fast with an actionable message if Node/Python are
+   missing; warns (does not hard-fail) if it cannot confirm MSVC.
+2. **npm cache health** — runs `npm cache verify`; if it errors (the D:/Dev-Drive
+   `UNKNOWN errno -4094` failure mode), it redirects to a fresh C: cache and sets
+   `$env:npm_config_cache` so **every** later npm/npx step uses it.
+3. `npm install`
+4. Create `.env` from `.env.example` (only if `.env` does not already exist) and
+   the `./data` runtime directories.
+5. **node-pty rebuild** — runs `scripts/fix-node-pty-spectre.cjs` (handles MSB8040
+   Spectre-lib gaps), clears `NoDefaultCurrentDirectoryInExePath` for the process
+   (winpty `GetCommitHash.bat` fix), then `npx electron-rebuild -f -w node-pty`,
+   then a **real ConPTY smoke test** via `npx electron scripts/pty-smoke.js`
+   (expects `NODE_PTY_OK ... sawData=true`).
 6. `npm run typecheck`
 7. `npm test` (expect **236 passing**)
 8. `npm run build`
 
 If every step is green you will see: `== All green. Launch with: npm start ==`.
 
-> **[UNVERIFIED ON WINDOWS]** Steps 5 (native rebuild + ABI load check) is the
-> one most likely to need attention on a brand-new machine — it is exactly the
-> part that cannot be exercised from Linux. See Troubleshooting.
+> **VERIFIED ON WINDOWS:** steps 3 (install via C: cache), 5 (rebuild against the
+> Electron 31 ABI + ConPTY smoke `sawData=true`), and 7 (236/236 tests) all ran
+> green on the real machine. See `docs/WINDOWS-FINDINGS.md` for the six first-run
+> problems and their durable fixes, all now baked into this script.
 
 ---
 
@@ -145,6 +156,10 @@ with a file:line. The test suite is pure TypeScript (no native deps), so if
 `npm test` passes but `npm start` fails, the problem is the native/Electron layer
 (see Troubleshooting), not the application logic.
 
+> **VERIFIED ON WINDOWS:** all 236 tests passed natively on the first real run.
+> A fresh-clone `npm run typecheck` previously failed on a missing `ws`
+> dependency (Problem 6); that is now fixed in `package.json`.
+
 ---
 
 ## (e) Launch
@@ -157,9 +172,12 @@ This runs `electron .` against the built `dist-electron/electron/main.js`. The
 window should open with the terminal pane on the left, the live widget dock on
 the right, and a `selfconnect:~/workspace$`-style prompt in a **real** PTY.
 
-> **[UNVERIFIED ON WINDOWS]** Window creation and the ConPTY-backed shell are
-> platform-native and were not run from Linux. On Windows the spawned shell is
-> `%COMSPEC%` (cmd.exe) unless `$SHELL`/PowerShell is configured.
+> **Partly verified.** The **ConPTY-backed shell** layer is **VERIFIED ON
+> WINDOWS** — the `scripts/pty-smoke.js` test spawned a real ConPTY child under
+> Electron 31 and saw live data (`NODE_PTY_OK ... sawData=true`). The Electron
+> **window/GUI launch itself** (`npm start`) is still **[UNVERIFIED ON WINDOWS]**
+> as of this writing. On Windows the spawned shell is `%COMSPEC%` (cmd.exe) unless
+> `$SHELL`/PowerShell is configured.
 
 ---
 
@@ -254,6 +272,60 @@ on-disk hash-chained ledger at `./data/selfconnect-ledger.jsonl`.
 
 ## (g) Troubleshooting
 
+> The six problems below were all hit on the first real Windows run and are now
+> handled automatically by `scripts/setup-windows.ps1`. They are documented here
+> in case you run steps manually or a fix needs re-applying. Full write-up:
+> `docs/WINDOWS-FINDINGS.md`.
+
+### `npm install` fails with `UNKNOWN ... errno -4094` (cache on D:/Dev Drive)
+- **Symptom:** `npm error code UNKNOWN, syscall read, errno -4094`, rollback to an
+  empty `node_modules`; cache "seems to be corrupted"; even `npm cache verify`
+  errors with `UNKNOWN`. Happens when the npm cache lives on a D: / Dev Drive that
+  an AV or reparse filter intercepts (disk space and permissions are fine).
+- **Fix:** point npm at a fresh cache on C: **and export it** so every subsequent
+  npm/npx call uses it (a later `npx` will otherwise fall back to the broken cache):
+  ```powershell
+  $env:npm_config_cache = "$env:USERPROFILE\.npm-cache-selfconnect"
+  npm install
+  ```
+  `setup-windows.ps1` step `[1/8]` does this automatically when `npm cache verify`
+  fails.
+
+### `GetCommitHash.bat is not recognized` (NoDefaultCurrentDirectoryInExePath)
+- **Symptom:** the node-pty rebuild fails because winpty's `winpty.gyp` runs
+  `cmd /c "cd shared && GetCommitHash.bat"`, and cmd refuses to run a batch file
+  from the current directory when `NoDefaultCurrentDirectoryInExePath=1` is set
+  machine-wide.
+- **Fix:** clear it for the current process, then rebuild:
+  ```powershell
+  $env:NoDefaultCurrentDirectoryInExePath = $null
+  npx electron-rebuild -f -w node-pty
+  ```
+  `setup-windows.ps1` clears this for its process before the rebuild step.
+
+### `MSB8040: Spectre-mitigated libraries are required`
+- **Symptom:** the rebuild fails with MSB8040 because node-pty's gyp files set
+  `'SpectreMitigation': 'Spectre'` but the VS install lacks the Spectre-mitigated
+  VC libraries.
+- **Fix (clean):** install the VS component "MSVC … C++ x64/x86 Spectre-mitigated
+  libs" in the Visual Studio Installer.
+- **Fix (fallback, automatic):** `setup-windows.ps1` runs
+  `node scripts/fix-node-pty-spectre.cjs` after install and before the rebuild; it
+  flips the flag to `'false'` in `node_modules/node-pty/binding.gyp` and
+  `deps/winpty/src/winpty.gyp` when the libs are absent. It is idempotent and
+  re-applies after every fresh `npm install` (which wipes the node_modules edit).
+  To force it: `node scripts/fix-node-pty-spectre.cjs --force`.
+
+### `npx electron -e "..."` hangs / "Unable to find Electron app"
+- **Symptom:** using `electron -e "<js>"` for a smoke test hangs and pops a dialog
+  "Unable to find Electron app at C:\...\try { ... }" — Electron treats the `-e`
+  payload as an app **path**, not eval code. (The dialog is harmless; dismiss it.)
+- **Fix:** run a real smoke **file** instead. This repo ships one:
+  ```powershell
+  npx electron scripts\pty-smoke.js
+  # expect: NODE_PTY_OK spawn=function exit=0 sawData=true
+  ```
+
 ### node-pty rebuild fails (ABI mismatch / missing MSVC)
 - **Symptom:** `electron-rebuild` errors, or `npm start` throws
   `Error: The module '...pty.node' was compiled against a different Node.js
@@ -264,7 +336,9 @@ on-disk hash-chained ledger at `./data/selfconnect-ledger.jsonl`.
   - Confirm Python is on PATH: `python --version`.
   - Force a clean rebuild against Electron's ABI:
     `npx electron-rebuild -f -w node-pty`
-  - Verify it loads: `npx electron -e "require('node-pty'); console.log('ok')"`.
+  - Verify it loads with a real smoke file (NOT `electron -e`, which does not
+    work — see above): `npx electron scripts\pty-smoke.js`
+    (expect `NODE_PTY_OK ... sawData=true`).
   - The installed Electron major must match `package.json` (**31**). If you
     bumped Electron, rebuild again.
 
@@ -285,9 +359,15 @@ on-disk hash-chained ledger at `./data/selfconnect-ledger.jsonl`.
 
 ### PowerShell execution policy blocks the script
 - **Symptom:** "running scripts is disabled on this system".
-- **Fix:** in the same shell, `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass`,
-  then re-run `pwsh -File scripts/setup-windows.ps1`. This affects only the
-  current process.
+- **Fix (no Bypass needed):** unblock just this one file, then run it:
+  ```powershell
+  Unblock-File scripts\setup-windows.ps1
+  pwsh -File scripts/setup-windows.ps1
+  ```
+  Or scope a milder policy to the current process only:
+  `Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned`. The script
+  does not require `-ExecutionPolicy Bypass`; every step is an ordinary npm/npx
+  command you can also run by hand.
 
 ### `npm test` passes but `npm start` fails
 - The test suite has no native dependency, so this isolates the failure to the

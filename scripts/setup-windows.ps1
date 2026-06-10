@@ -6,8 +6,13 @@
 #   - Python 3.x (node-gyp dependency for the node-pty native addon)
 #   - Visual Studio C++ Build Tools ("Desktop development with C++" workload),
 #     required to compile node-pty's native addon on Windows.
-#   - If scripts are blocked, run in PowerShell:
-#       Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+#
+# This script does NOT require `-ExecutionPolicy Bypass`. If PowerShell blocks
+# it, either unblock the single file:
+#       Unblock-File scripts\setup-windows.ps1
+# or scope the policy to the current process only:
+#       Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned
+# or run the steps manually (each is an ordinary npm/npx command).
 #
 # Usage:
 #   pwsh -File scripts/setup-windows.ps1
@@ -26,7 +31,7 @@ function Have($name) {
 Write-Host '== SelfConnect Terminal: Windows setup ==' -ForegroundColor Cyan
 
 # 0. Prerequisite checks (fail fast with actionable messages).
-Write-Host '[0/7] checking prerequisites' -ForegroundColor Yellow
+Write-Host '[0/8] checking prerequisites' -ForegroundColor Yellow
 
 if (-not (Have 'node')) {
     Fail 'Node.js not found. Install Node 20 LTS: winget install OpenJS.NodeJS.LTS  (then reopen the shell).'
@@ -58,18 +63,45 @@ if (Test-Path $vswhere) {
 if (-not $hasMsvc) {
     Write-Host '   WARNING: could not confirm the Visual Studio C++ Build Tools ("Desktop' -ForegroundColor Yellow
     Write-Host '            development with C++" workload). The node-pty native rebuild in' -ForegroundColor Yellow
-    Write-Host '            step [4/7] will fail without it. Install with:' -ForegroundColor Yellow
+    Write-Host '            step [5/8] will fail without it. Install with:' -ForegroundColor Yellow
     Write-Host '            winget install Microsoft.VisualStudio.2022.BuildTools --override "--quiet --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"' -ForegroundColor Yellow
     Write-Host '            Continuing — the rebuild step will surface the real error if it is missing.' -ForegroundColor Yellow
 }
 
-# 1. Install dependencies.
-Write-Host '[1/7] npm install' -ForegroundColor Yellow
-npm install
-if ($LASTEXITCODE -ne 0) { Fail 'npm install failed (see output above).' }
+# 0b. npm cache health (Problem 1: a cache on a D:/Dev-Drive can throw
+#     "UNKNOWN, errno -4094" under an AV/filter driver, breaking every install).
+#     If `npm cache verify` errors, redirect to a fresh cache under the user
+#     profile on C:. We export $env:npm_config_cache so the redirect STICKS for
+#     every npm/npx invocation below (otherwise a later npx falls back to the
+#     broken cache).
+Write-Host '[1/8] npm cache health' -ForegroundColor Yellow
+$cacheOk = $true
+try {
+    npm cache verify *> $null
+    if ($LASTEXITCODE -ne 0) { $cacheOk = $false }
+} catch {
+    $cacheOk = $false
+}
+if (-not $cacheOk) {
+    $freshCache = Join-Path $env:USERPROFILE '.npm-cache-selfconnect'
+    if (-not (Test-Path $freshCache)) { New-Item -ItemType Directory -Path $freshCache -Force | Out-Null }
+    $env:npm_config_cache = $freshCache
+    Write-Host "   npm cache verify FAILED — redirecting all npm/npx calls to a fresh cache:" -ForegroundColor Yellow
+    Write-Host "     $freshCache" -ForegroundColor Yellow
+    Write-Host "   (set for this process so every step below uses it.)" -ForegroundColor Yellow
+} else {
+    Write-Host '   npm cache verify (OK).'
+}
 
-# 2. Copy .env from the example if it does not yet exist.
-Write-Host '[2/7] ensure .env' -ForegroundColor Yellow
+# 2. Install dependencies.
+Write-Host '[2/8] npm install' -ForegroundColor Yellow
+npm install
+if ($LASTEXITCODE -ne 0) {
+    Fail 'npm install failed. If you saw "UNKNOWN ... errno -4094", your npm cache drive is blocked (AV / Dev Drive filter). Set a C: cache and retry: $env:npm_config_cache = "$env:USERPROFILE\.npm-cache-selfconnect"; npm install. See docs/WINDOWS-RUN.md.'
+}
+
+# 3. Copy .env from the example if it does not yet exist.
+Write-Host '[3/8] ensure .env' -ForegroundColor Yellow
 if (-not (Test-Path '.env.example')) {
     Fail '.env.example is missing from the repo — cannot create .env. Re-clone the repository.'
 }
@@ -80,40 +112,60 @@ if (-not (Test-Path '.env')) {
     Write-Host '   .env already exists; leaving it untouched.'
 }
 
-# 3. Ensure runtime data directories exist (ledger, sessions, checkpoints, keys).
-Write-Host '[3/7] ensure ./data directories' -ForegroundColor Yellow
+# 3b. Ensure runtime data directories exist (ledger, sessions, checkpoints, keys).
+Write-Host '[4/8] ensure ./data directories' -ForegroundColor Yellow
 foreach ($d in @('data', 'data\sessions', 'data\checkpoints', 'data\keys', 'data\a2a', 'data\context-store')) {
     if (-not (Test-Path $d)) { New-Item -ItemType Directory -Path $d -Force | Out-Null }
 }
 Write-Host '   data directories present.'
 
-# 4. Rebuild node-pty against the Electron ABI (ConPTY).
-Write-Host '[4/7] electron-rebuild node-pty (Electron ABI / ConPTY)' -ForegroundColor Yellow
+# 5. Rebuild node-pty against the Electron ABI (ConPTY).
+Write-Host '[5/8] electron-rebuild node-pty (Electron ABI / ConPTY)' -ForegroundColor Yellow
+
+# Problem 4: node-pty's gyp files require Spectre-mitigated MSVC libs. If this VS
+# install lacks them, the rebuild dies with MSB8040. This patch (run every setup,
+# AFTER install and BEFORE rebuild) flips the flag off when the libs are absent.
+# It edits node_modules, so it MUST run after each fresh install (which wipes it).
+Write-Host '   applying node-pty Spectre-mitigation fix (if needed)' -ForegroundColor Yellow
+node scripts/fix-node-pty-spectre.cjs
+if ($LASTEXITCODE -ne 0) { Fail 'fix-node-pty-spectre.cjs failed (see output above).' }
+
+# Problem 3: when NoDefaultCurrentDirectoryInExePath=1 is set machine-wide, cmd.exe
+# refuses to run winpty's GetCommitHash.bat from the current directory, so the
+# rebuild fails with "GetCommitHash.bat is not recognized". Clear it for this
+# process only (does not touch the machine/user setting).
+if ($env:NoDefaultCurrentDirectoryInExePath) {
+    Write-Host '   clearing NoDefaultCurrentDirectoryInExePath for this process (winpty build fix)' -ForegroundColor Yellow
+    $env:NoDefaultCurrentDirectoryInExePath = $null
+}
+
 npx electron-rebuild -f -w node-pty
 if ($LASTEXITCODE -ne 0) {
-    Fail 'electron-rebuild failed. Most common cause on a fresh machine: missing the Visual Studio C++ Build Tools ("Desktop development with C++") or Python. See docs/WINDOWS-RUN.md Troubleshooting.'
+    Fail 'electron-rebuild failed. Common fresh-machine causes: missing VS C++ Build Tools / Python; MSB8040 (Spectre libs — the fix script should have handled it); or "GetCommitHash.bat is not recognized" (NoDefaultCurrentDirectoryInExePath — cleared above). See docs/WINDOWS-RUN.md Troubleshooting.'
 }
 
-# 4b. Verify the native binding actually loads against the Electron ABI.
-Write-Host '   verifying node-pty native binding loads under Electron' -ForegroundColor Yellow
-npx electron -e "try { require('node-pty'); console.log('node-pty OK'); } catch (e) { console.error('node-pty FAILED to load:', e.message); process.exit(1); }"
+# 5b. Verify node-pty loads AND a real ConPTY child spawns, under Electron.
+# Problem 5: `electron -e "..."` does NOT work (Electron treats the payload as an
+# app path and hangs with a dialog). Run a real smoke FILE instead.
+Write-Host '   node-pty + ConPTY smoke test under Electron' -ForegroundColor Yellow
+npx electron scripts/pty-smoke.js
 if ($LASTEXITCODE -ne 0) {
-    Fail 'node-pty rebuilt but failed to load under Electron (ABI mismatch). Re-run electron-rebuild, and confirm the installed Electron major version matches package.json (31). See docs/WINDOWS-RUN.md.'
+    Fail 'node-pty rebuilt but the Electron+ConPTY smoke test failed. Re-run electron-rebuild and confirm the installed Electron major matches package.json (31). See docs/WINDOWS-RUN.md.'
 }
-Write-Host '   node-pty loads under Electron (OK).'
+Write-Host '   node-pty + ConPTY smoke PASS (NODE_PTY_OK).'
 
-# 5. Typecheck.
-Write-Host '[5/7] npm run typecheck' -ForegroundColor Yellow
+# 6. Typecheck.
+Write-Host '[6/8] npm run typecheck' -ForegroundColor Yellow
 npm run typecheck
 if ($LASTEXITCODE -ne 0) { Fail 'typecheck failed (see output above).' }
 
-# 6. Tests.
-Write-Host '[6/7] npm test' -ForegroundColor Yellow
+# 7. Tests.
+Write-Host '[7/8] npm test' -ForegroundColor Yellow
 npm test
 if ($LASTEXITCODE -ne 0) { Fail 'tests failed (see output above).' }
 
-# 7. Production build.
-Write-Host '[7/7] npm run build' -ForegroundColor Yellow
+# 8. Production build.
+Write-Host '[8/8] npm run build' -ForegroundColor Yellow
 npm run build
 if ($LASTEXITCODE -ne 0) { Fail 'build failed (see output above).' }
 
