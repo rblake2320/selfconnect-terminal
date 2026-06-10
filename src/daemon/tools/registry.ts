@@ -1,8 +1,10 @@
 import {
+  type ConfidenceDecision,
   type DelegationVerdict,
   type Identity,
   type PermissionMode,
   type RiskSeverity,
+  type SimulationPreview,
   type ToolDescriptor,
   type ToolResult,
 } from '../../shared/contracts';
@@ -10,26 +12,71 @@ import { assessCommand } from '../command-risk';
 import { BUILTIN_TOOLS } from './builtins';
 import { CheckpointStore } from './checkpoint-store';
 import { HookEngine } from './hooks';
+import { simulateTool } from './simulate';
 import type { GovernedTool, ToolContext, ToolServices } from './types';
 
 export interface ToolRegistryDeps {
   checkpoints: CheckpointStore;
   hooks: HookEngine;
   services: ToolServices;
-  /** Identity stamp factory for a given logical agent name. */
-  stampFor: (agent: string) => Identity;
+  /**
+   * Identity stamp factory for a given logical agent name. An explicit runId
+   * may be supplied (D6 lab arms share one runId so their ledger slice is
+   * cleanly attributable); otherwise a fresh run is minted per invocation.
+   */
+  stampFor: (agent: string, runId?: string) => Identity;
   /** Current permission mode. */
   permissionMode: () => PermissionMode;
   /** Audit a governed bus+ledger event. */
-  audit: (type: 'tool.call' | 'tool.result' | 'tool.blocked' | 'checkpoint.created' | 'hook.fired', payload: unknown, identity: Identity) => void;
+  audit: (
+    type:
+      | 'tool.call'
+      | 'tool.result'
+      | 'tool.blocked'
+      | 'checkpoint.created'
+      | 'hook.fired'
+      | 'tool.simulated'
+      | 'confidence.reported'
+      | 'confidence.escalated',
+    payload: unknown,
+    identity: Identity,
+  ) => void;
   /** Request human approval for a gated tool; resolves true if granted. */
-  requestApproval: (summary: string) => Promise<boolean>;
+  requestApproval: (summary: string, preview?: SimulationPreview) => Promise<boolean>;
   /**
    * Authorize a tool against the caller's delegation chain (B2.2). Optional so
    * standalone registries (tests) keep working without a delegation registry.
    */
   authorizeDelegation?: (agent: string, action: { tool?: string }) => DelegationVerdict;
+  /**
+   * Baseline cloud pricing (USD/1M tokens) used to estimate simulated costs.
+   * Optional so standalone test registries keep working.
+   */
+  baselineCloudPrice?: { inputPerMillion: number; outputPerMillion: number };
+  /**
+   * E6 uncertainty router. Given the tool's blast radius + a reported
+   * confidence, decide whether to proceed, force a dry-run verify, or escalate
+   * to human approval. Optional; absent => always proceed.
+   */
+  confidenceRouter?: (input: {
+    tool: string;
+    mutating: boolean;
+    risk: RiskSeverity;
+    confidence: number;
+  }) => ConfidenceDecision;
 }
+
+/** Optional governance envelope a caller may attach to a tool invocation. */
+export interface InvokeOptions {
+  /** E5: do not execute; return predicted effects only. */
+  simulate?: boolean;
+  /** E6: the actor's confidence in this action (0..1) + rationale. */
+  confidence?: { value: number; rationale?: string };
+  /** D6: pin the identity stamp to a specific runId (lab arm isolation). */
+  runId?: string;
+}
+
+const DEFAULT_PRICE = { inputPerMillion: 3, outputPerMillion: 15 };
 
 const RISK_ORDER: Record<RiskSeverity, number> = { low: 0, medium: 1, high: 2, critical: 3 };
 
@@ -77,9 +124,10 @@ export class ToolRegistry {
     rawInput: unknown,
     agent = 'tool',
     allowed?: string[],
+    options: InvokeOptions = {},
   ): Promise<ToolResult> {
     const tool = this.tools.get(name);
-    const identity = this.deps.stampFor(agent);
+    const identity = this.deps.stampFor(agent, options.runId);
     if (!tool) {
       return this.blocked(name, identity, `unknown tool: ${name}`);
     }
@@ -96,6 +144,23 @@ export class ToolRegistry {
 
     const mode = this.deps.permissionMode();
 
+    // Risk escalation: bash inspects the actual command.
+    let effectiveRisk: RiskSeverity = tool.risk;
+    if (name === 'bash') {
+      const finding = assessCommand((input as { command: string }).command);
+      if (finding && RISK_ORDER[finding.severity] > RISK_ORDER[effectiveRisk]) {
+        effectiveRisk = finding.severity;
+      }
+    }
+
+    // E5 dry-run: predict effects WITHOUT executing. Audited as tool.simulated;
+    // bypasses permission/approval gates because nothing actually happens.
+    if (options.simulate) {
+      const preview = this.preview(name, input, tool.mutating, effectiveRisk);
+      this.deps.audit('tool.simulated', { tool: name, mutating: tool.mutating, risk: effectiveRisk }, identity);
+      return { ok: true, tool: name, output: JSON.stringify(preview) };
+    }
+
     // Permission mode: plan blocks all mutating tools.
     if (mode === 'plan' && tool.mutating) {
       return this.blocked(name, identity, `plan mode blocks mutating tool '${name}'`);
@@ -110,12 +175,27 @@ export class ToolRegistry {
       }
     }
 
-    // Risk escalation: bash inspects the actual command.
-    let effectiveRisk: RiskSeverity = tool.risk;
-    if (name === 'bash') {
-      const finding = assessCommand((input as { command: string }).command);
-      if (finding && RISK_ORDER[finding.severity] > RISK_ORDER[effectiveRisk]) {
-        effectiveRisk = finding.severity;
+    // E6 uncertainty channel: a reported confidence + the action's blast radius
+    // route low-confidence risky/mutating actions to forced verification (a
+    // dry-run shown for approval) or straight escalation to human approval.
+    let escalate = false;
+    let escalateReason = '';
+    if (options.confidence && this.deps.confidenceRouter) {
+      const decision = this.deps.confidenceRouter({
+        tool: name,
+        mutating: tool.mutating,
+        risk: effectiveRisk,
+        confidence: options.confidence.value,
+      });
+      this.deps.audit(
+        'confidence.reported',
+        { tool: name, confidence: options.confidence.value, rationale: options.confidence.rationale ?? '', route: decision.route },
+        identity,
+      );
+      if (decision.route !== 'proceed') {
+        escalate = true;
+        escalateReason = decision.reason;
+        this.deps.audit('confidence.escalated', { tool: name, ...decision }, identity);
       }
     }
 
@@ -128,13 +208,17 @@ export class ToolRegistry {
 
     // Approval gate:
     //  - ask mode gates all mutating tools;
-    //  - high/critical risk always gated (even in auto).
+    //  - high/critical risk always gated (even in auto);
+    //  - E6 low-confidence escalation forces approval too.
     const needsApproval =
-      (mode === 'ask' && tool.mutating) || RISK_ORDER[effectiveRisk] >= RISK_ORDER.high;
+      escalate || (mode === 'ask' && tool.mutating) || RISK_ORDER[effectiveRisk] >= RISK_ORDER.high;
     if (needsApproval) {
-      const granted = await this.deps.requestApproval(
-        `tool ${name} (${effectiveRisk}) by ${identity.agentId}`,
-      );
+      // Attach a dry-run preview so the human approves evidence, not a promise.
+      const preview = this.preview(name, input, tool.mutating, effectiveRisk);
+      const summary = escalate
+        ? `tool ${name} (${effectiveRisk}, low-confidence: ${escalateReason}) by ${identity.agentId}`
+        : `tool ${name} (${effectiveRisk}) by ${identity.agentId}`;
+      const granted = await this.deps.requestApproval(summary, preview);
       if (!granted) {
         return this.blocked(name, identity, `tool '${name}' not approved`);
       }
@@ -168,6 +252,17 @@ export class ToolRegistry {
 
     this.deps.audit('tool.result', { tool: name, ok: true }, identity);
     return { ok: true, tool: name, output };
+  }
+
+  /**
+   * Dry-run preview for a tool + validated input. Pure: delegates to the
+   * side-effect-free planners in simulate.ts. The registry's effective risk
+   * (which may be escalated for bash) is merged in when the planner did not
+   * already supply one.
+   */
+  private preview(name: string, input: unknown, mutating: boolean, risk: RiskSeverity): SimulationPreview {
+    const p = simulateTool(name, input, mutating, this.deps.baselineCloudPrice ?? DEFAULT_PRICE);
+    return p.risk ? p : { ...p, risk };
   }
 
   private blocked(name: string, identity: Identity, reason: string): ToolResult {

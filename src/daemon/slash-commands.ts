@@ -1,5 +1,6 @@
 import type { Daemon } from './daemon';
 import type { PermissionMode, ReviewMode, SlashResult } from '../shared/contracts';
+import { LabTaskSchema } from '../shared/contracts';
 
 const REVIEW_MODES: ReviewMode[] = ['optimize', 'bugs', 'architecture', 'security', 'next-steps', 'full'];
 
@@ -50,6 +51,9 @@ const COMMANDS: CommandSpec[] = [
   { name: 'delegate', usage: '/delegate <grantee> [tools=a,b] [budget=0.05] [ttl=3600] [class=public,internal]', summary: 'issue a scoped delegation grant' },
   { name: 'grants', usage: '/grants [hash]', summary: 'list delegation grants (or verify one chain)' },
   { name: 'passport', usage: '/passport [verify]', summary: 'export (or verify) a signed work-history passport' },
+  { name: 'lab', usage: '/lab run <task-file> [arms=a,b] | /lab report <sessionId>', summary: 'D6: evaluate a task under harness arms; score from the ledger' },
+  { name: 'simulate', usage: '/simulate <tool> <json-input>', summary: 'E5: dry-run a tool — predicted effects only, nothing executes' },
+  { name: 'consult', usage: '/consult <question> [budget=0.05] [provider=ollama]', summary: 'E7: a different model critiques a proposed action' },
 ];
 
 function helpText(): string {
@@ -289,9 +293,98 @@ export async function dispatchSlash(daemon: Daemon, line: string): Promise<Slash
     case 'passport':
       return passport(daemon, rest);
 
+    case 'lab':
+      return lab(daemon, rest);
+
+    case 'simulate':
+      return simulate(daemon, rest);
+
+    case 'consult':
+      return consult(daemon, rest);
+
     default:
       return unknown(name);
   }
+}
+
+/**
+ * D6: run a harness-lab task file. Usage: /lab run <task-file> [arms=a,b],
+ * /lab report <sessionId>. `/lab demo` is intentionally NOT handled here — the
+ * mock preview bridge owns the scripted demo.
+ */
+async function lab(daemon: Daemon, rest: string): Promise<SlashResult> {
+  const { positionals, flags } = parseFlags(rest);
+  const sub = (positionals[0] ?? '').toLowerCase();
+  if (sub === 'run') {
+    const file = positionals[1];
+    if (!file) return { ok: false, output: 'usage: /lab run <task-file> [arms=a,b]' };
+    let task;
+    try {
+      const { readFileSync } = await import('node:fs');
+      task = LabTaskSchema.parse(JSON.parse(readFileSync(file, 'utf8')));
+    } catch (err) {
+      return { ok: false, output: `lab: cannot load task file — ${err instanceof Error ? err.message : String(err)}` };
+    }
+    const armNames = flags.arms ? flags.arms.split(',').map((s) => s.trim()).filter(Boolean) : undefined;
+    const selected = armNames ? { ...task, arms: task.arms.filter((a) => armNames.includes(a.name)) } : task;
+    if (selected.arms.length === 0) return { ok: false, output: 'lab: no arms selected' };
+    const report = await daemon.runLab(selected);
+    return { ok: true, output: daemon.renderLab(report) };
+  }
+  if (sub === 'report') {
+    const sessionId = positionals[1];
+    if (!sessionId) return { ok: false, output: 'usage: /lab report <sessionId>' };
+    const report = daemon.reportLab(sessionId);
+    return { ok: true, output: daemon.renderLab(report) };
+  }
+  return { ok: false, output: 'usage: /lab run <task-file> [arms=a,b] | /lab report <sessionId>' };
+}
+
+/** E5: dry-run a single tool. Usage: /simulate <tool> <json-input>. */
+async function simulate(daemon: Daemon, rest: string): Promise<SlashResult> {
+  const { name: tool, rest: args } = parse(rest);
+  if (!tool) return { ok: false, output: 'usage: /simulate <tool> <json-input>' };
+  let input: unknown = {};
+  if (args) {
+    try {
+      input = JSON.parse(args);
+    } catch {
+      return { ok: false, output: 'simulate: input must be valid JSON' };
+    }
+  }
+  const result = await daemon.tools.invoke(tool, input, 'tool', undefined, { simulate: true });
+  if (!result.ok) return { ok: false, output: result.blockReason ?? result.error ?? 'simulate failed' };
+  try {
+    const preview = JSON.parse(result.output);
+    const lines = [
+      `dry-run: ${preview.summary}`,
+      `  mutating=${preview.mutating}  files=[${(preview.filesTouched ?? []).join(', ')}]`,
+    ];
+    if (preview.risk) lines.push(`  risk=${preview.risk}${preview.riskReason ? ` (${preview.riskReason})` : ''}`);
+    if (preview.estimatedCostUsd) lines.push(`  est. cost=$${preview.estimatedCostUsd.toFixed(4)}`);
+    if (preview.diff) lines.push('  diff:', preview.diff.split('\n').map((l: string) => `    ${l}`).join('\n'));
+    return { ok: true, output: lines.join('\n') };
+  } catch {
+    return { ok: true, output: result.output };
+  }
+}
+
+/** E7: ask a different model for a second opinion. Usage: /consult <question>. */
+async function consult(daemon: Daemon, rest: string): Promise<SlashResult> {
+  const { positionals, flags } = parseFlags(rest);
+  const question = positionals.join(' ').trim() || flags.q;
+  if (!question) return { ok: false, output: 'usage: /consult <question> [budget=0.05] [provider=ollama]' };
+  const budgetUsd = flags.budget !== undefined ? Number(flags.budget) : undefined;
+  const provider = flags.provider as 'ollama' | 'openai-compatible' | 'anthropic' | undefined;
+  const r = await daemon.consult({ question, budgetUsd, provider });
+  if (!r.ok) return { ok: false, output: `consult blocked: ${r.blockReason ?? 'unknown'}` };
+  return {
+    ok: true,
+    output: [
+      `second opinion via ${r.provider}/${r.model} (confidence ${(r.confidence * 100).toFixed(0)}%, $${r.cost.costUsd.toFixed(4)}, ${r.redactionCount} redactions):`,
+      r.critique,
+    ].join('\n'),
+  };
 }
 
 async function mcp(daemon: Daemon, rest: string): Promise<SlashResult> {

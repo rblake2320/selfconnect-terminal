@@ -42,6 +42,8 @@ export interface DaemonConfig {
   keysDir: string;
   checkpointsLedgerPath: string;
   delegationsPath: string;
+  // --- v3c: Proof layer ---
+  confidenceThreshold: number;
 }
 
 function num(value: string | undefined, fallback: number): number {
@@ -94,6 +96,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): DaemonConfig {
     keysDir: env.SELFCONNECT_KEYS_DIR || './data/keys',
     checkpointsLedgerPath: env.SELFCONNECT_CHECKPOINTS_LEDGER || './data/ledger-checkpoints.jsonl',
     delegationsPath: env.SELFCONNECT_DELEGATIONS_PATH || './data/delegations.jsonl',
+    confidenceThreshold: Math.min(1, Math.max(0, num(env.SELFCONNECT_CONFIDENCE_THRESHOLD, 0.5))),
   };
 }
 

@@ -4,6 +4,7 @@ import {
   type ApprovalRequest,
   type ApprovalStatus,
   type ProviderKind,
+  type SimulationPreview,
 } from '../shared/contracts';
 
 /**
@@ -19,6 +20,8 @@ export interface CreateApprovalInput {
   provider: ProviderKind;
   model: string;
   estimatedCostUsd: number;
+  /** E5: optional dry-run preview so the human approves evidence, not a promise. */
+  preview?: SimulationPreview;
 }
 
 type Resolver = (status: ApprovalStatus) => void;
@@ -76,6 +79,7 @@ export class ApprovalManager {
       provider: input.provider,
       model: input.model,
       estimatedCostUsd: input.estimatedCostUsd,
+      preview: input.preview,
       createdAt,
       expiresAt: createdAt + this.timeoutMs,
       status: 'pending',

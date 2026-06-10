@@ -23,7 +23,11 @@ import type {
   A2aKind,
   A2aPeer,
   SlashResult,
+  LabTask,
+  LabReport,
+  ConsultResult,
 } from '../shared/contracts';
+import type { InvokeOptions } from '../daemon/tools/registry';
 
 export interface SelfConnectClientOptions {
   /** Override env-sourced config (mainly for tests). */
@@ -115,8 +119,43 @@ export class SelfConnectClient {
     return this.daemon.tools.list();
   }
 
-  invokeTool(name: string, input: unknown, agent = 'tool'): Promise<ToolResult> {
-    return this.daemon.tools.invoke(name, input, agent);
+  invokeTool(
+    name: string,
+    input: unknown,
+    agent = 'tool',
+    options?: InvokeOptions,
+  ): Promise<ToolResult> {
+    return this.daemon.tools.invoke(name, input, agent, undefined, options);
+  }
+
+  /** E5: dry-run a tool — predicted effects only, nothing executes. */
+  simulateTool(name: string, input: unknown, agent = 'tool'): Promise<ToolResult> {
+    return this.daemon.tools.invoke(name, input, agent, undefined, { simulate: true });
+  }
+
+  // -- D6 harness lab ------------------------------------------------------
+
+  runLab(task: LabTask): Promise<LabReport> {
+    return this.daemon.runLab(task);
+  }
+
+  reportLab(sessionId: string, taskName?: string): LabReport {
+    return this.daemon.reportLab(sessionId, taskName);
+  }
+
+  renderLab(report: LabReport): string {
+    return this.daemon.renderLab(report);
+  }
+
+  // -- E7 consult (second opinion) -----------------------------------------
+
+  consult(input: {
+    question: string;
+    contextRefs?: string[];
+    provider?: 'ollama' | 'openai-compatible' | 'anthropic';
+    budgetUsd?: number;
+  }): Promise<ConsultResult> {
+    return this.daemon.consult(input);
   }
 
   // -- A2A -----------------------------------------------------------------

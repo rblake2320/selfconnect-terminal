@@ -19,12 +19,13 @@ import {
   type ReplayBundle,
   type DataClass,
   type LedgerEntry,
+  type ProviderKind,
 } from '../shared/contracts';
 import { loadConfig, type DaemonConfig } from './config';
 import { EventBus } from './event-bus';
 import { IdentityRegistry } from './identity';
 import { AuditLedger } from './audit-ledger';
-import { PolicyEngine } from './policy-engine';
+import { PolicyEngine, routeConfidence } from './policy-engine';
 import { ApprovalManager } from './approvals';
 import { SecuritySentinel } from './security-sentinel';
 import { ContextGauge } from './context-gauge';
@@ -56,6 +57,13 @@ import {
 import { buildEvidenceBundle, bundleDigest } from './evidence';
 import { toIetfAuditTrail } from './ietf-audit';
 import { buildReplayBundle, verifyReplayBundle } from './replay';
+import {
+  scoreArm,
+  rescoreFromLedger,
+  renderComparison,
+  inputToText,
+  type ArmStepObservation,
+} from './lab';
 import type { ToolServices } from './tools/types';
 import type {
   SlashResult,
@@ -63,6 +71,11 @@ import type {
   LimitsManifest,
   MetabolicState,
   ContextBlobKind,
+  SimulationPreview,
+  LabReport,
+  LabTask,
+  LabArmConfig,
+  ConsultResult,
 } from '../shared/contracts';
 import { ContextStore } from './context-store';
 import { SessionKnowledgeStore } from './session-knowledge';
@@ -108,6 +121,8 @@ export class Daemon {
   readonly delegation: DelegationRegistry;
   private rootGrant: DelegationCert | null = null;
   private lastPassport: PassportArtifact | null = null;
+  // v3c: Proof layer — latest harness-lab report (for the renderer LabPanel).
+  private lastLabReport: LabReport | null = null;
   // v3: Context Economy + agent's own asks
   readonly contextStore: ContextStore;
   readonly knowledge = new SessionKnowledgeStore();
@@ -173,14 +188,20 @@ export class Daemon {
       checkpoints: this.checkpoints,
       hooks: this.hooks,
       services: this.buildToolServices(),
-      stampFor: (agent) => this.identity.stamp(agent, this.identity.newRun()),
+      stampFor: (agent, runId) => this.identity.stamp(agent, runId ?? this.identity.newRun()),
       permissionMode: () => this.permissionMode,
       audit: (type, payload, identity) => {
         this.bus.publish(type, payload, identity);
         this.ledger.append({ type, payload, identity });
       },
-      requestApproval: (summary) => this.gateToolApproval(summary),
+      requestApproval: (summary, preview) => this.gateToolApproval(summary, preview),
       authorizeDelegation: (agent, action) => this.authorizeDelegation(agent, action),
+      baselineCloudPrice: {
+        inputPerMillion: cfg.baselineInputPrice,
+        outputPerMillion: cfg.baselineOutputPrice,
+      },
+      confidenceRouter: (input) =>
+        routeConfidence({ ...input, threshold: this.cfg.confidenceThreshold }),
     });
 
     // Register the core agents in the mesh.
@@ -578,19 +599,247 @@ export class Daemon {
     return result;
   }
 
+  // -- E7: second opinion (consult) ----------------------------------------
+
+  /**
+   * Consult a DIFFERENT provider/model for a critique of a proposed risky
+   * action before it runs. The question + context are redacted before egress;
+   * the call is budgeted via the Cost Kernel and approval-gated exactly like any
+   * other cloud send (free and ungated for a local model). Audited as
+   * consult.requested → consult.result through the single record() choke point.
+   */
+  async consult(input: {
+    question: string;
+    contextRefs?: string[];
+    provider?: ProviderKind;
+    budgetUsd?: number;
+  }): Promise<ConsultResult> {
+    const agent = 'review';
+    // Pick a provider DIFFERENT from the primary local one when possible, so the
+    // critique is a genuine second opinion. Caller may force one.
+    const primary = this.registry.local();
+    let provider = input.provider ? this.registry.get(input.provider) : null;
+    if (!provider) {
+      const alt = this.registry
+        .all()
+        .find((p) => p.kind !== primary.kind && p.isConfigured());
+      provider = alt ?? primary;
+    }
+
+    // Redact question + context before it can leave the trusted core.
+    const rawContext = (input.contextRefs ?? []).join('\n');
+    const rawText = `${input.question}\n${rawContext}`;
+    const { redacted, total } = redact(rawText);
+    this.sentinel.addRedactions(total);
+    if (total > 0) this.record('redaction.applied', { count: total }, agent);
+
+    const inputTokens = estimateTokens(redacted);
+    const outputTokens = 400;
+    const estimate = this.cost.estimate(provider.tier, inputTokens, outputTokens, provider.price());
+
+    this.record(
+      'consult.requested',
+      {
+        provider: provider.kind,
+        model: provider.model,
+        tier: provider.tier,
+        estimatedCostUsd: estimate.costUsd,
+        redactionCount: total,
+      },
+      agent,
+    );
+
+    // Budget guard (E7): refuse if the estimate exceeds the caller's budget.
+    if (input.budgetUsd !== undefined && estimate.costUsd > input.budgetUsd) {
+      const blockReason = `consult estimate $${estimate.costUsd.toFixed(4)} exceeds budget $${input.budgetUsd.toFixed(4)}`;
+      const blocked: ConsultResult = {
+        ok: false,
+        provider: provider.kind,
+        model: provider.model,
+        critique: '',
+        confidence: 0,
+        cost: estimate,
+        redactionCount: total,
+        blocked: true,
+        blockReason,
+      };
+      this.record('consult.result', { ...blocked, critique: '[redacted]' }, agent);
+      return blocked;
+    }
+
+    // Policy + approval, identical to a normal cloud send (local => free/ungated).
+    const decision = this.router.route({ estimatedCostUsd: estimate.costUsd });
+    if (decision.blocked) {
+      const blocked: ConsultResult = {
+        ok: false,
+        provider: provider.kind,
+        model: provider.model,
+        critique: '',
+        confidence: 0,
+        cost: estimate,
+        redactionCount: total,
+        blocked: true,
+        blockReason: decision.blockReason ?? 'blocked by policy',
+      };
+      this.record('consult.result', { ...blocked, critique: '[redacted]' }, agent);
+      return blocked;
+    }
+    if (decision.requiresApproval) {
+      const granted = await this.gateToolApproval(
+        `consult ${provider.kind}/${provider.model} for second opinion`,
+      );
+      if (!granted) {
+        const blocked: ConsultResult = {
+          ok: false,
+          provider: provider.kind,
+          model: provider.model,
+          critique: '',
+          confidence: 0,
+          cost: estimate,
+          redactionCount: total,
+          blocked: true,
+          blockReason: 'consult not approved',
+        };
+        this.record('consult.result', { ...blocked, critique: '[redacted]' }, agent);
+        return blocked;
+      }
+    }
+
+    const completion = await provider.complete({
+      model: provider.model,
+      system:
+        'You are a second-opinion reviewer. Critique the proposed action for risk, ' +
+        'correctness, and unintended consequences. Be concise.',
+      prompt: redacted,
+      maxTokens: outputTokens,
+    });
+    const verified = this.cost.record(
+      provider.tier,
+      completion.inputTokens,
+      completion.outputTokens,
+      provider.price(),
+    );
+    // Redact the critique on the way back in as well.
+    const { redacted: critique, total: outRedactions } = redact(completion.text);
+    const result: ConsultResult = {
+      ok: true,
+      provider: provider.kind,
+      model: provider.model,
+      critique,
+      confidence: 0.7,
+      cost: verified,
+      redactionCount: total + outRedactions,
+    };
+    this.record('consult.result', { ...result, critique: `[${critique.length} chars]` }, agent);
+    this.record('cost.update', this.cost.snapshot(), 'system');
+    return result;
+  }
+
+  // -- D6: harness lab -----------------------------------------------------
+
+  /**
+   * Run a task under multiple harness configurations ("arms"), each in an
+   * isolated runId within this session, and score each arm purely from its
+   * ledger slice. Arms run sequentially and are fully audited. Returns the
+   * side-by-side report (also stored for the renderer LabPanel).
+   */
+  async runLab(task: LabTask): Promise<LabReport> {
+    const ranAt = Date.now();
+    this.record('lab.run', { task: task.name, arms: task.arms.map((a) => a.name) }, 'system');
+
+    const scores = [];
+    for (const arm of task.arms) {
+      scores.push(await this.runArm(task, arm));
+    }
+
+    const report: LabReport = {
+      task: task.name,
+      sessionId: this.identity.sessionId,
+      ranAt,
+      scores,
+    };
+    this.lastLabReport = report;
+    this.record('lab.scored', { task: task.name, arms: scores.length }, 'system');
+    return report;
+  }
+
+  /** Execute a single arm: apply its config, run steps, time + verify, score. */
+  private async runArm(task: LabTask, arm: LabArmConfig) {
+    const runId = this.identity.newRun();
+    const prevMode = this.permissionMode;
+    if (arm.permissionMode) this.permissionMode = arm.permissionMode;
+
+    const steps: ArmStepObservation[] = [];
+    const startedAt = Date.now();
+    for (const step of task.steps) {
+      const inputText = inputToText(step.input);
+      const result = await this.tools.invoke(step.tool, step.input, 'tool', arm.tools, {
+        runId,
+      });
+      steps.push({ tool: step.tool, inputText, result });
+    }
+    const wallTimeMs = Date.now() - startedAt;
+
+    // Verify command exit code declares success (0 = pass); none => null.
+    let verifyExitCode: number | null = null;
+    if (task.verify) {
+      verifyExitCode = await this.runVerify(task.verify);
+    }
+
+    this.permissionMode = prevMode;
+
+    // Record the arm marker (used by `lab report` to re-slice the ledger), then
+    // score from the ledger slice for this runId.
+    this.record(
+      'lab.arm',
+      { arm: arm.name, runId, wallTimeMs, verifyExitCode, config: arm },
+      'system',
+    );
+    const ledgerSlice = this.ledger.all().filter((e) => e.runId === runId);
+    return scoreArm({ arm: arm.name, runId, steps, ledgerSlice, wallTimeMs, verifyExitCode });
+  }
+
+  /** Run a verify shell command; resolve its exit code (non-zero on failure). */
+  private async runVerify(command: string): Promise<number> {
+    const { spawn } = await import('node:child_process');
+    return new Promise<number>((resolve) => {
+      const child = spawn(command, { shell: true, cwd: this.terminalCwd });
+      child.on('error', () => resolve(127));
+      child.on('close', (code) => resolve(code ?? 0));
+    });
+  }
+
+  /** Re-score a past lab run from the session ledger (`selfconnect lab report`). */
+  reportLab(sessionId: string, taskName = 'replayed'): LabReport {
+    const report = rescoreFromLedger(taskName, sessionId, this.ledger.all());
+    this.lastLabReport = report;
+    return report;
+  }
+
+  /** Render a lab report as a CLI comparison table. */
+  renderLab(report: LabReport): string {
+    return renderComparison(report);
+  }
+
+  /** The most recent lab report (for the renderer LabPanel via IPC). */
+  latestLabReport(): LabReport | null {
+    return this.lastLabReport;
+  }
+
   // -- Approvals -----------------------------------------------------------
 
   decideApproval(id: string, approve: boolean): void {
     this.approvals.decide(id, approve);
   }
 
-  private async gateToolApproval(summary: string): Promise<boolean> {
+  private async gateToolApproval(summary: string, preview?: SimulationPreview): Promise<boolean> {
     const { promise } = this.approvals.request({
       kind: 'cloud-send',
       summary,
       provider: 'ollama',
       model: 'tool',
       estimatedCostUsd: 0,
+      preview,
     });
     const status = await promise;
     return ApprovalManager.isGranted(status);
@@ -884,6 +1133,11 @@ export class Daemon {
         const bundle = this.exportEvidence(sessionId);
         return JSON.stringify({ sessionId: bundle.sessionId, report: bundle.report, digest: bundleDigest(bundle) });
       },
+      // v3c: proof layer
+      consult: async (input) => {
+        const r = await this.consult(input);
+        return JSON.stringify(r);
+      },
     };
   }
 
@@ -927,6 +1181,8 @@ export class Daemon {
       metering: this.cost.meteringList(),
       grants: this.delegation.all(),
       checkpoints: this.ledgerCheckpoints.count(),
+      lab: this.lastLabReport,
+      confidenceThreshold: this.cfg.confidenceThreshold,
     };
   }
 

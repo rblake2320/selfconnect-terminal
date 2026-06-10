@@ -84,6 +84,14 @@ export interface ToolServices {
   passportExport(sessionId?: string): string;
   /** Export a compliance evidence bundle digest for a session (B). */
   evidenceExport(sessionId?: string): string;
+  // --- v3c: Proof layer ---
+  /** E7 second opinion: a different provider critiques a proposed action. */
+  consult(input: {
+    question: string;
+    contextRefs?: string[];
+    provider?: 'ollama' | 'openai-compatible' | 'anthropic';
+    budgetUsd?: number;
+  }): Promise<string>;
 }
 
 export interface ToolInvocationResult {

@@ -97,6 +97,15 @@ export const EventTypeSchema = z.enum([
   'metering.recorded',
   'evidence.exported',
   'replay.exported',
+  // --- v3c: proof layer (D6 / E5 / E6 / E7) ---
+  'lab.run',
+  'lab.arm',
+  'lab.scored',
+  'tool.simulated',
+  'confidence.reported',
+  'confidence.escalated',
+  'consult.requested',
+  'consult.result',
 ]);
 export type EventType = z.infer<typeof EventTypeSchema>;
 
@@ -257,6 +266,34 @@ export const SentinelSnapshotSchema = z.object({
 export type SentinelSnapshot = z.infer<typeof SentinelSnapshotSchema>;
 
 // ---------------------------------------------------------------------------
+// v3c (E5): dry-run simulation preview (defined here so approvals can attach one)
+// ---------------------------------------------------------------------------
+
+/**
+ * A tool simulation. Mutating tools accept `simulate: true` and return predicted
+ * effects WITHOUT executing — a diff preview for writers, the files they would
+ * touch, and (for bash/cloud) a command-risk classification + estimated cost. An
+ * approval request may attach one so the human approves evidence, not a promise.
+ */
+export const SimulationPreviewSchema = z.object({
+  tool: z.string(),
+  /** Whether the tool actually mutates state when really run. */
+  mutating: z.boolean(),
+  /** One-line human summary of the predicted effect. */
+  summary: z.string(),
+  /** Files this action would create/modify/delete. */
+  filesTouched: z.array(z.string()).default([]),
+  /** Unified-ish diff preview for write/edit/patch (truncated). */
+  diff: z.string().optional(),
+  /** Risk classification (bash/cloud), if any. */
+  risk: RiskSeveritySchema.optional(),
+  riskReason: z.string().optional(),
+  /** Estimated USD cost of really running this (0 for local/free). */
+  estimatedCostUsd: z.number().nonnegative().default(0),
+});
+export type SimulationPreview = z.infer<typeof SimulationPreviewSchema>;
+
+// ---------------------------------------------------------------------------
 // Approvals
 // ---------------------------------------------------------------------------
 
@@ -276,6 +313,8 @@ export const ApprovalRequestSchema = z.object({
   createdAt: z.number().int().nonnegative(),
   expiresAt: z.number().int().nonnegative(),
   status: ApprovalStatusSchema,
+  /** v3c (E5): a dry-run simulation preview, so the human approves evidence. */
+  preview: SimulationPreviewSchema.optional(),
 });
 export type ApprovalRequest = z.infer<typeof ApprovalRequestSchema>;
 
@@ -359,6 +398,10 @@ export type ResumeSession = z.infer<typeof ResumeSessionSchema>;
 export const ReplayEventsSchema = z.object({ sessionId: z.string().optional() });
 export type ReplayEvents = z.infer<typeof ReplayEventsSchema>;
 
+/** v3c: read the most recent lab report (renderer LabPanel). */
+export const LabLatestSchema = z.object({ sessionId: z.string().optional() });
+export type LabLatest = z.infer<typeof LabLatestSchema>;
+
 /** Result of dispatching a slash command (returned over IPC to the renderer). */
 export const SlashResultSchema = z.object({
   output: z.string(),
@@ -396,6 +439,8 @@ export const IPC = {
   sessionResume: 'session:resume',
   // v3b renderer -> main (invoke)
   replayEvents: 'replay:events',
+  // v3c renderer -> main (invoke)
+  labLatest: 'lab:latest',
   // main -> renderer (send)
   busEvent: 'bus:event',
   ptyData: 'pty:data',
@@ -837,6 +882,117 @@ export const ToolResultSchema = z.object({
 export type ToolResult = z.infer<typeof ToolResultSchema>;
 
 // ---------------------------------------------------------------------------
+// v3c: Proof layer — D6 harness lab, E5 dry-run, E6 uncertainty, E7 consult
+// ---------------------------------------------------------------------------
+
+/**
+ * E6 uncertainty channel: an action may carry the actor's confidence (0..1) and
+ * a short rationale. The policy engine routes low-confidence + high-blast-radius
+ * actions to automatic verification (dry-run) or approval escalation.
+ */
+export const ConfidenceSchema = z.object({
+  /** 0 (no idea) .. 1 (certain). */
+  value: z.number().min(0).max(1),
+  rationale: z.string().default(''),
+});
+export type Confidence = z.infer<typeof ConfidenceSchema>;
+
+export const ConfidenceRouteSchema = z.enum(['proceed', 'verify', 'escalate']);
+export type ConfidenceRoute = z.infer<typeof ConfidenceRouteSchema>;
+
+/** Decision of the uncertainty router for a single action (E6). */
+export const ConfidenceDecisionSchema = z.object({
+  route: ConfidenceRouteSchema,
+  confidence: z.number().min(0).max(1),
+  threshold: z.number().min(0).max(1),
+  /** Whether the action is high-blast-radius (mutating/cloud/risky). */
+  highBlastRadius: z.boolean(),
+  reason: z.string(),
+});
+export type ConfidenceDecision = z.infer<typeof ConfidenceDecisionSchema>;
+
+/**
+ * E7 second opinion: a different provider/model critiques a proposed risky
+ * action before execution. Budgeted via the Cost Kernel, redacted, and
+ * approval-gated like any cloud call (free for local models).
+ */
+export const ConsultResultSchema = z.object({
+  ok: z.boolean(),
+  provider: ProviderKindSchema,
+  model: z.string(),
+  /** The critique text (redacted on the way out and in). */
+  critique: z.string(),
+  /** Consulted model's own confidence in its critique. */
+  confidence: z.number().min(0).max(1).default(0),
+  cost: CostEstimateSchema,
+  redactionCount: z.number().int().nonnegative().default(0),
+  blocked: z.boolean().optional(),
+  blockReason: z.string().optional(),
+});
+export type ConsultResult = z.infer<typeof ConsultResultSchema>;
+
+/**
+ * D6 harness lab: an "arm" is a named harness configuration evaluated against a
+ * task. We vary toolset, context policy (hot-window size / dedup), model/provider
+ * choice, and permission mode, then score each arm from its ledger slice.
+ */
+export const LabArmConfigSchema = z.object({
+  name: z.string().min(1),
+  /** Scoped toolset for the arm (undefined = full surface). */
+  tools: z.array(z.string()).optional(),
+  /** Hot-window token budget override (context policy). */
+  hotWindowTokens: z.number().int().positive().optional(),
+  /** Whether dedup is on for this arm. */
+  dedup: z.boolean().optional(),
+  /** Provider/model choice. */
+  provider: ProviderKindSchema.optional(),
+  model: z.string().optional(),
+  /** Permission mode for the arm. */
+  permissionMode: PermissionModeSchema.optional(),
+});
+export type LabArmConfig = z.infer<typeof LabArmConfigSchema>;
+
+/** A task definition file for the lab. The verify command's exit code = success. */
+export const LabTaskSchema = z.object({
+  name: z.string().min(1),
+  /** The prompt/goal handed to each arm. */
+  prompt: z.string().default(''),
+  /** Tool invocations to run per arm (name + input), the "work" of the task. */
+  steps: z
+    .array(z.object({ tool: z.string(), input: z.unknown().optional() }))
+    .default([]),
+  /** Shell command whose exit code declares success (0 = pass). */
+  verify: z.string().optional(),
+  arms: z.array(LabArmConfigSchema).default([]),
+});
+export type LabTask = z.infer<typeof LabTaskSchema>;
+
+/** The score of one arm, derived purely from its ledger slice. */
+export const LabArmScoreSchema = z.object({
+  arm: z.string(),
+  runId: z.string(),
+  turns: z.number().int().nonnegative(),
+  totalTokens: z.number().int().nonnegative(),
+  cacheHitPct: z.number().min(0).max(100),
+  toolErrorRate: z.number().min(0).max(100),
+  approvalsTriggered: z.number().int().nonnegative(),
+  wallTimeMs: z.number().int().nonnegative(),
+  success: z.boolean(),
+  /** Exit code of the verify command (null if none declared). */
+  verifyExitCode: z.number().int().nullable(),
+});
+export type LabArmScore = z.infer<typeof LabArmScoreSchema>;
+
+/** The full side-by-side comparison of a lab run. */
+export const LabReportSchema = z.object({
+  task: z.string(),
+  sessionId: z.string(),
+  ranAt: z.number().int().nonnegative(),
+  scores: z.array(LabArmScoreSchema),
+});
+export type LabReport = z.infer<typeof LabReportSchema>;
+
+// ---------------------------------------------------------------------------
 // Aggregate UI state pushed to the renderer.
 // ---------------------------------------------------------------------------
 
@@ -864,5 +1020,10 @@ export const UiStateSchema = z.object({
   metering: z.array(MeteringRecordSchema).default([]),
   grants: z.array(DelegationCertSchema).default([]),
   checkpoints: z.number().int().nonnegative().default(0),
+  // --- v3c: proof layer ---
+  /** Most recent lab report (D6), if any. */
+  lab: LabReportSchema.nullable().default(null),
+  /** E6 confidence threshold below which high-blast-radius actions escalate. */
+  confidenceThreshold: z.number().min(0).max(1).default(0.5),
 });
 export type UiState = z.infer<typeof UiStateSchema>;

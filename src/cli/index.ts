@@ -26,7 +26,7 @@ import { SelfConnectClient } from '../sdk/index';
 import { zipStore, bundleFiles } from '../daemon/evidence';
 import { verifyReplayBundle } from '../daemon/replay';
 import { verifyPassport, verifyReveal } from '../daemon/passport';
-import { ReplayBundleSchema, PassportSchema } from '../shared/contracts';
+import { ReplayBundleSchema, PassportSchema, LabTaskSchema } from '../shared/contracts';
 
 function print(line: string): void {
   process.stdout.write(line.endsWith('\n') ? line : line + '\n');
@@ -51,6 +51,8 @@ function usage(): void {
       '  passport export|verify  export or verify a signed work-history passport',
       '  evidence export [sid]   write a compliance evidence bundle (.zip)',
       '  replay export|verify    write or verify a signed .screplay session bundle',
+      '  lab run <task> --arms <a,b>   evaluate a task under harness arms',
+      '  lab report <sessionId>        re-score a past lab run from the ledger',
     ].join('\n'),
   );
 }
@@ -240,6 +242,61 @@ export async function main(argv: string[]): Promise<number> {
         return v.ok ? 0 : 1;
       }
       print('usage: selfconnect replay export|verify [file]');
+      return 1;
+    }
+
+    case 'lab': {
+      const sub = rest[0];
+      if (sub === 'run') {
+        const flags = rest.slice(1).filter((a) => a.startsWith('--'));
+        const args = rest.slice(1).filter((a) => !a.startsWith('--'));
+        const taskFile = args[0];
+        if (!taskFile) {
+          print('usage: selfconnect lab run <task-file> [--arms a,b] [--json]');
+          return 1;
+        }
+        const parsed = LabTaskSchema.safeParse(JSON.parse(readFileSync(taskFile, 'utf8')));
+        if (!parsed.success) {
+          print('lab: invalid task file format');
+          return 1;
+        }
+        const task = parsed.data;
+        // --arms <a,b> selects a subset of the task's declared arms (by name).
+        const armsFlag = flags.find((f) => f.startsWith('--arms='));
+        const armsInline = armsFlag ? armsFlag.slice('--arms='.length) : undefined;
+        const armsPositional = (() => {
+          const idx = rest.indexOf('--arms');
+          return idx >= 0 ? rest[idx + 1] : undefined;
+        })();
+        const armNames = (armsInline ?? armsPositional)?.split(',').map((s) => s.trim()).filter(Boolean);
+        const selected = armNames
+          ? { ...task, arms: task.arms.filter((a) => armNames.includes(a.name)) }
+          : task;
+        if (selected.arms.length === 0) {
+          print('lab: no arms selected (check --arms names against the task file)');
+          return 1;
+        }
+        const report = await client.runLab(selected);
+        if (flags.includes('--json')) {
+          print(JSON.stringify(report, null, 2));
+        } else {
+          print(client.renderLab(report));
+        }
+        return 0;
+      }
+      if (sub === 'report') {
+        const sessionId = rest[1];
+        if (!sessionId) {
+          print('usage: selfconnect lab report <sessionId>');
+          return 1;
+        }
+        const report = client.reportLab(sessionId);
+        print(client.renderLab(report));
+        print('');
+        print(JSON.stringify(report, null, 2));
+        return 0;
+      }
+      print('usage: selfconnect lab run <task-file> --arms <a,b> | lab report <sessionId>');
       return 1;
     }
 
