@@ -83,6 +83,20 @@ export const EventTypeSchema = z.enum([
   'scratchpad.read',
   'introspect.query',
   'limits.loaded',
+  // --- v3b: trust layer (B / B2) ---
+  'identity.key_created',
+  'envelope.signed',
+  'signature.verified',
+  'signature.invalid',
+  'checkpoint.signed',
+  'grant.root',
+  'delegation.issued',
+  'delegation.denied',
+  'passport.exported',
+  'passport.verified',
+  'metering.recorded',
+  'evidence.exported',
+  'replay.exported',
 ]);
 export type EventType = z.infer<typeof EventTypeSchema>;
 
@@ -508,6 +522,209 @@ export const MetabolicStateSchema = z.object({
 export type MetabolicState = z.infer<typeof MetabolicStateSchema>;
 
 // ---------------------------------------------------------------------------
+// v3b: Trust layer — Ed25519 identity keys, delegation, passport, receipts
+// ---------------------------------------------------------------------------
+
+/**
+ * A public-key record for an agent. The private key NEVER leaves the daemon
+ * keystore (./data/keys/) and is never serialized into any contract — only the
+ * raw 32-byte Ed25519 public key (hex) crosses a boundary.
+ */
+export const AgentPublicKeySchema = z.object({
+  agentId: z.string().min(1),
+  /** Raw Ed25519 public key, hex-encoded (64 hex chars). */
+  publicKeyHex: z.string().min(1),
+  createdAt: z.number().int().nonnegative(),
+});
+export type AgentPublicKey = z.infer<typeof AgentPublicKeySchema>;
+
+/** A detached Ed25519 signature over a canonical message, with its signer. */
+export const SignatureSchema = z.object({
+  /** agentId of the signer (look up its public key to verify). */
+  signer: z.string().min(1),
+  /** Raw Ed25519 public key of the signer at signing time (hex). */
+  publicKeyHex: z.string().min(1),
+  /** Detached signature, hex-encoded. */
+  sigHex: z.string().min(1),
+  /** Signing algorithm tag (forward-compat). */
+  alg: z.literal('ed25519').default('ed25519'),
+});
+export type Signature = z.infer<typeof SignatureSchema>;
+
+/**
+ * A signed, hash-chained ledger checkpoint. Periodically the daemon seals the
+ * current ledger head (seq + hash) with the system agent's Ed25519 key, turning
+ * the SHA-256 chain into a SIGNED chain robust to ledger-file substitution.
+ */
+export const LedgerCheckpointSchema = z.object({
+  /** Sequence number of the ledger entry this checkpoint seals (inclusive). */
+  seq: z.number().int().nonnegative(),
+  /** Ledger head hash at the checkpoint. */
+  hash: z.string().min(1),
+  /** Number of entries covered (== seq + 1). */
+  entries: z.number().int().nonnegative(),
+  ts: z.number().int().nonnegative(),
+  signature: SignatureSchema,
+});
+export type LedgerCheckpoint = z.infer<typeof LedgerCheckpointSchema>;
+
+/** Data classes a delegation may permit a grantee to touch. */
+export const DataClassSchema = z.enum([
+  'public',
+  'internal',
+  'secret',
+  'cui',
+]);
+export type DataClass = z.infer<typeof DataClassSchema>;
+
+/**
+ * The scoped authority a delegation grants. A chain of certificates must
+ * terminate at a human root grant; the daemon REFUSES any tool/A2A action whose
+ * effective scope is missing, expired, over-tools, over-budget, or over-class.
+ */
+export const DelegationScopeSchema = z.object({
+  /** Tools the grantee may invoke. '*' means all (only valid on a human root). */
+  tools: z.array(z.string()).default(['*']),
+  /** Hard spend ceiling (USD) for actions under this grant. */
+  spendBudgetUsd: z.number().nonnegative().default(0),
+  /** Absolute expiry (epoch ms). 0 means "inherit parent" / no extra limit. */
+  expiresAt: z.number().int().nonnegative().default(0),
+  /** Data classes the grantee may handle. */
+  dataClasses: z.array(DataClassSchema).default(['public']),
+});
+export type DelegationScope = z.infer<typeof DelegationScopeSchema>;
+
+/**
+ * A delegation certificate: a scoped capability grant from `issuer` to
+ * `grantee`, signed by the issuer's identity key. `parent` is the hash of the
+ * certificate one link up the chain; a root grant has parent === null and is
+ * authorized by a human (issuer === 'human').
+ */
+export const DelegationCertSchema = z.object({
+  /** Content hash of the canonical certificate (id + dedupe + chain link). */
+  hash: z.string().min(1),
+  /** agentId of the granting party, or 'human' for a root grant. */
+  issuer: z.string().min(1),
+  /** agentId receiving the authority. */
+  grantee: z.string().min(1),
+  scope: DelegationScopeSchema,
+  /** Hash of the parent certificate, or null for a human root grant. */
+  parent: z.string().nullable(),
+  issuedAt: z.number().int().nonnegative(),
+  /** Whether a human approved this grant (true only on the root). */
+  humanApproved: z.boolean().default(false),
+  signature: SignatureSchema,
+});
+export type DelegationCert = z.infer<typeof DelegationCertSchema>;
+
+/** Result of verifying a delegation chain back to a human root. */
+export const DelegationVerdictSchema = z.object({
+  ok: z.boolean(),
+  reason: z.string(),
+  /** Effective (intersected) scope across the whole chain, if ok. */
+  effectiveScope: DelegationScopeSchema.optional(),
+  /** Certificate hashes from grantee up to the human root. */
+  chain: z.array(z.string()).default([]),
+});
+export type DelegationVerdict = z.infer<typeof DelegationVerdictSchema>;
+
+/** Per-agent resource accounting (B2.4 inter-agent metering). */
+export const MeteringRecordSchema = z.object({
+  agentId: z.string().min(1),
+  toolCalls: z.number().int().nonnegative().default(0),
+  spendUsd: z.number().nonnegative().default(0),
+  inputTokens: z.number().int().nonnegative().default(0),
+  outputTokens: z.number().int().nonnegative().default(0),
+  updatedAt: z.number().int().nonnegative().default(0),
+});
+export type MeteringRecord = z.infer<typeof MeteringRecordSchema>;
+
+/** A signed metering receipt that may ride on an A2A envelope (B2.4). */
+export const MeteringReceiptSchema = z.object({
+  record: MeteringRecordSchema,
+  signature: SignatureSchema,
+});
+export type MeteringReceipt = z.infer<typeof MeteringReceiptSchema>;
+
+/**
+ * Agent passport (B2.3): an exportable, signed summary of an agent's work
+ * history backed by a Merkle hash-tree over its ledger events. The `merkleRoot`
+ * is third-party verifiable; subtrees (proofs) can be revealed selectively
+ * without exposing event content.
+ */
+export const PassportSummarySchema = z.object({
+  sessions: z.number().int().nonnegative(),
+  toolCalls: z.number().int().nonnegative(),
+  spendUsd: z.number().nonnegative(),
+  riskFindings: z.number().int().nonnegative(),
+  approvalsRequested: z.number().int().nonnegative(),
+  approvalsResolved: z.number().int().nonnegative(),
+  events: z.number().int().nonnegative(),
+});
+export type PassportSummary = z.infer<typeof PassportSummarySchema>;
+
+export const PassportSchema = z.object({
+  version: z.literal(1).default(1),
+  agentId: z.string().min(1),
+  issuedAt: z.number().int().nonnegative(),
+  summary: PassportSummarySchema,
+  /** Merkle root over the leaf hashes of the covered ledger events. */
+  merkleRoot: z.string().min(1),
+  /** Number of leaves (events) in the tree. */
+  leafCount: z.number().int().nonnegative(),
+  signature: SignatureSchema,
+});
+export type Passport = z.infer<typeof PassportSchema>;
+
+/** A Merkle inclusion proof for one leaf (selective reveal). */
+export const MerkleProofStepSchema = z.object({
+  hash: z.string(),
+  /** Sibling side: is the sibling on the left of the current node? */
+  left: z.boolean(),
+});
+export type MerkleProofStep = z.infer<typeof MerkleProofStepSchema>;
+
+export const MerkleRevealSchema = z.object({
+  /** Leaf index revealed. */
+  index: z.number().int().nonnegative(),
+  /** The revealed leaf hash (content stays private unless caller adds it). */
+  leafHash: z.string(),
+  /** Optional revealed leaf content (caller opts in to disclose). */
+  content: z.string().optional(),
+  proof: z.array(MerkleProofStepSchema),
+});
+export type MerkleReveal = z.infer<typeof MerkleRevealSchema>;
+
+/**
+ * A signed session-replay bundle (.screplay): the ordered ledger events for a
+ * session plus the signed checkpoints covering them and the signer's public
+ * key, so a third party can verify the chain + signatures and scrub the
+ * timeline in a browser. Event payloads were already redaction-gated at record
+ * time, so the bundle carries no fresh secrets.
+ */
+export const ReplayBundleSchema = z.object({
+  version: z.literal(1).default(1),
+  sessionId: z.string().min(1),
+  exportedAt: z.number().int().nonnegative(),
+  events: z.array(LedgerEntrySchema),
+  checkpoints: z.array(LedgerCheckpointSchema).default([]),
+  publicKeys: z.array(AgentPublicKeySchema).default([]),
+  signature: SignatureSchema,
+});
+export type ReplayBundle = z.infer<typeof ReplayBundleSchema>;
+
+/** Verification report embedded in an evidence bundle. */
+export const VerificationReportSchema = z.object({
+  chainOk: z.boolean(),
+  checkpointsOk: z.boolean(),
+  entries: z.number().int().nonnegative(),
+  checkpoints: z.number().int().nonnegative(),
+  brokenAt: z.number().int().nonnegative().nullable(),
+  generatedAt: z.number().int().nonnegative(),
+});
+export type VerificationReport = z.infer<typeof VerificationReportSchema>;
+
+// ---------------------------------------------------------------------------
 // v2: Sessions
 // ---------------------------------------------------------------------------
 
@@ -564,6 +781,10 @@ export const BpcEnvelopeSchema = z.object({
   payload: z.unknown(),
   prevHash: z.string(),
   hash: z.string(),
+  /** v3b: detached Ed25519 signature over the envelope hash (additive). */
+  signature: SignatureSchema.optional(),
+  /** v3b: optional signed metering receipt carried with the envelope (B2.4). */
+  receipt: MeteringReceiptSchema.optional(),
 });
 export type BpcEnvelope = z.infer<typeof BpcEnvelopeSchema>;
 
@@ -634,5 +855,9 @@ export const UiStateSchema = z.object({
   knowledge: SessionKnowledgeSchema,
   metabolic: MetabolicStateSchema,
   pinned: z.array(ContextBlobRefSchema).default([]),
+  // --- v3b: trust layer ---
+  metering: z.array(MeteringRecordSchema).default([]),
+  grants: z.array(DelegationCertSchema).default([]),
+  checkpoints: z.number().int().nonnegative().default(0),
 });
 export type UiState = z.infer<typeof UiStateSchema>;

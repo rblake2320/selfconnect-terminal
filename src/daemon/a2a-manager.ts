@@ -3,7 +3,9 @@ import {
   type A2aPeer,
   type BpcEnvelope,
   type Identity,
+  type MeteringReceipt,
   type RiskFinding,
+  type Signature,
 } from '../shared/contracts';
 import { redact } from './redactor';
 import {
@@ -11,6 +13,7 @@ import {
   sealEnvelope,
   verifyChain,
 } from './adapters/bpc-envelope';
+import { verifySignature } from './agent-keys';
 import { makeTransport, type A2aMode, type TskTransport } from './adapters/tsk-transport';
 
 export interface A2aOptions {
@@ -18,6 +21,8 @@ export interface A2aOptions {
   dir: string;
   wsPort: number;
   allowlist: string[];
+  /** Sign an envelope hash with the sender's identity key (B2.1). */
+  signHash?: (hash: string) => Signature;
 }
 
 interface PeerState {
@@ -48,10 +53,17 @@ export class A2aManager {
   private transport: TskTransport;
   private peers = new Map<string, PeerState>();
   private allow: Set<string>;
+  private signHash?: (hash: string) => Signature;
 
   constructor(opts: A2aOptions) {
     this.transport = makeTransport(opts.mode, { dir: opts.dir, wsPort: opts.wsPort });
     this.allow = new Set(opts.allowlist.filter((p) => p.trim().length > 0));
+    this.signHash = opts.signHash;
+  }
+
+  /** Inject (or replace) the envelope signer after construction. */
+  setSigner(signHash: (hash: string) => Signature): void {
+    this.signHash = signHash;
   }
 
   async start(): Promise<void> {
@@ -102,6 +114,7 @@ export class A2aManager {
     peer: string,
     kind: A2aKind,
     payload: unknown,
+    receipt?: MeteringReceipt,
   ): Promise<SendResult> {
     const p = this.peer(peer);
     const raw = typeof payload === 'string' ? payload : JSON.stringify(payload);
@@ -113,6 +126,8 @@ export class A2aManager {
       kind,
       payload: redacted,
       prevHash,
+      receipt,
+      signHash: this.signHash,
     });
     p.outChain.push(envelope);
     p.sent += 1;
@@ -141,6 +156,17 @@ export class A2aManager {
           severity: 'high',
           reason: `A2A chain from peer ${fromPeer} broken at envelope ${check.brokenAt}`,
           pattern: 'bpc-chain',
+        });
+      }
+      // B2.1: if the envelope is signed, the signature must verify over its
+      // hash. A present-but-invalid signature is an impersonation attempt.
+      if (env.signature && !verifySignature(env.hash, env.signature)) {
+        p.chainOk = false;
+        findings.push({
+          command: `a2a:${fromPeer}`,
+          severity: 'high',
+          reason: `A2A envelope ${env.id} from ${fromPeer} has an INVALID signature (impersonation)`,
+          pattern: 'bpc-signature',
         });
       }
     }

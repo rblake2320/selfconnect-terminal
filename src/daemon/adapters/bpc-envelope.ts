@@ -4,6 +4,8 @@ import {
   type A2aKind,
   type BpcEnvelope,
   type Identity,
+  type MeteringReceipt,
+  type Signature,
 } from '../../shared/contracts';
 
 /**
@@ -39,12 +41,15 @@ export interface SealInput {
   payload: unknown;
   prevHash: string;
   ts?: number;
+  receipt?: MeteringReceipt;
+  /** Sign the envelope hash with the sender's identity key (B2.1). */
+  signHash?: (hash: string) => Signature;
 }
 
 /** Build the next sealed envelope in a peer chain. */
 export function sealEnvelope(input: SealInput): BpcEnvelope {
-  const base: Omit<BpcEnvelope, 'hash'> = {
-    bpc: '1.0',
+  const base = {
+    bpc: '1.0' as const,
     id: `bpc_${randomUUID()}`,
     from: input.from,
     to: input.to,
@@ -53,14 +58,20 @@ export function sealEnvelope(input: SealInput): BpcEnvelope {
     payload: input.payload,
     prevHash: input.prevHash,
   };
-  return { ...base, hash: hashEnvelope(base) };
+  const hash = hashEnvelope(base);
+  const env: BpcEnvelope = { ...base, hash };
+  if (input.receipt) env.receipt = input.receipt;
+  if (input.signHash) env.signature = input.signHash(hash);
+  return env;
 }
 
 /** Verify a single envelope's self-hash. */
 export function verifyEnvelope(env: BpcEnvelope): boolean {
   const parsed = BpcEnvelopeSchema.safeParse(env);
   if (!parsed.success) return false;
-  const { hash, ...rest } = env;
+  const { hash, signature, receipt, ...rest } = env;
+  void signature;
+  void receipt;
   return hashEnvelope(rest) === hash;
 }
 

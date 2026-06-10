@@ -1,4 +1,4 @@
-import type { CostEstimate, CostSnapshot, ProviderTier } from '../shared/contracts';
+import type { CostEstimate, CostSnapshot, MeteringRecord, ProviderTier } from '../shared/contracts';
 
 /**
  * Cost Kernel. Tracks estimated-before-send vs verified-after-response token
@@ -47,8 +47,52 @@ export class CostKernel {
   private distillationSavingsUsd = 0;
   private freshInputTokens = 0;
   private totalInputTokens = 0;
+  // --- v3b: per-agent metering (B2.4 inter-agent accounting) ---
+  private metering = new Map<string, MeteringRecord>();
 
   constructor(private opts: CostKernelOptions) {}
+
+  /**
+   * Book resource consumption against a specific agent (B2.4). The primitive
+   * for future agent-to-agent settlement — provable accounting, no payments.
+   */
+  meter(agentId: string, delta: { toolCalls?: number; spendUsd?: number; inputTokens?: number; outputTokens?: number }): MeteringRecord {
+    const cur = this.metering.get(agentId) ?? {
+      agentId,
+      toolCalls: 0,
+      spendUsd: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      updatedAt: 0,
+    };
+    const next: MeteringRecord = {
+      agentId,
+      toolCalls: cur.toolCalls + (delta.toolCalls ?? 0),
+      spendUsd: cur.spendUsd + (delta.spendUsd ?? 0),
+      inputTokens: cur.inputTokens + (delta.inputTokens ?? 0),
+      outputTokens: cur.outputTokens + (delta.outputTokens ?? 0),
+      updatedAt: Date.now(),
+    };
+    this.metering.set(agentId, next);
+    return next;
+  }
+
+  meteringFor(agentId: string): MeteringRecord {
+    return (
+      this.metering.get(agentId) ?? {
+        agentId,
+        toolCalls: 0,
+        spendUsd: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        updatedAt: 0,
+      }
+    );
+  }
+
+  meteringList(): MeteringRecord[] {
+    return [...this.metering.values()];
+  }
 
   get perCallCapUsd(): number {
     return this.opts.perCallCapUsd;
