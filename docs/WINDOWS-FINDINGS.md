@@ -2,8 +2,10 @@
 
 This is the problem report from the **first real Windows 11 launch** of the app
 (Windows 11 build 10.0.26200, Node v24.3.0, npm 11.4.2, Python 3.12, VS 2022
-BuildTools, Ollama). Six problems surfaced; all six now have a durable fix in the
-repo. Hand this to the next machine and it should hit **zero** of these.
+BuildTools, Ollama). Six problems surfaced on that first run; a seventh
+(Problem 7) was found in the built Electron app immediately after. All seven now
+have a durable fix in the repo. Hand this to the next machine and it should hit
+**zero** of these.
 
 Each entry: **symptom → root cause → immediate on-machine fix → durable fix now
 in repo → status.**
@@ -129,6 +131,77 @@ in repo → status.**
   the type and the dependency are now declared so fresh installs typecheck and
   ws-mode actually works.
 - **Status:** FIXED (durable). Typecheck verified green with the types present.
+
+---
+
+## Problem 7 — built Electron app rendered the SIMULATED browser preview (BLOCKER)
+
+- **Symptom:** after `npm run build`, launching the real app (`electron.exe .`)
+  showed the **browser-preview simulation** inside the Electron window: the banner
+  read "SIMULATED static preview … faked client-side (no real PTY, daemon, or
+  model providers)" and commands returned "(simulated shell — try 'help')". The
+  real daemon, PTY, and providers were never reached.
+- **Root cause:** two compounding bugs.
+  1. **Preload aborted under `sandbox: true`.** `electron/preload.ts` did a
+     runtime `import { IPC } from '../src/shared/contracts'`, which `tsc` emits as
+     `require("../src/shared/contracts")`. With `sandbox: true`, Electron's
+     restricted preload `require` resolves only `electron` plus a few polyfilled
+     builtins — **not** arbitrary relative file-path modules. The require threw,
+     so the preload aborted **before** `contextBridge.exposeInMainWorld('selfconnect', …)`
+     ran, and `window.selfconnect` was never defined. (The user's first
+     hypothesis — that the built preload was ESM — was wrong: the built
+     `preload.js` was already CommonJS. The killer was the relative `require`, not
+     the module format. The file existing on disk is a red herring: sandboxed
+     `require` blocks it regardless of platform, which is why this reproduced on
+     Windows.)
+  2. **mock-bridge silently filled the gap.** `src/renderer/mock-bridge.ts`'s
+     `installMockBridgeIfNeeded()` only checked `if (window.selfconnect) return`.
+     With the bridge missing it installed the full simulation — *inside the real
+     app* — instead of failing loudly.
+- **Immediate fix (worked):** n/a on-machine; this is a pure repo bug fixed below.
+- **Durable fix in repo:**
+  - `electron/preload.ts` now **inlines** the IPC channel string constants
+    (`const IPC = { … } as const`) and imports everything else from contracts as
+    `import type` (erased at compile time). The built preload therefore
+    `require`s **only `electron`**, runs to completion under `sandbox: true`, and
+    exposes the real bridge. Security is unchanged: `sandbox: true`,
+    `contextIsolation: true`, `nodeIntegration: false`, narrow typed surface.
+  - A new test, `tests/preload-ipc-parity.test.ts`, fails if the inlined values
+    ever drift from the canonical `IPC` in `src/shared/contracts.ts`, and asserts
+    the preload does not value-import contracts.
+  - **HARD RULE enforced:** the mock can never run inside Electron. Vite injects a
+    compile-time `__SELFCONNECT_PREVIEW__` flag (`true` only for the
+    `SELFCONNECT_PREVIEW=1` preview build). `installMockBridgeIfNeeded()` now
+    returns `'real' | 'mock' | 'fatal'` and installs the mock **only** when
+    `__SELFCONNECT_PREVIEW__` **and** `!navigator.userAgent.includes('Electron')`.
+    In the real Electron bundle the flag is `false`, so the entire mock path is
+    **dead-code-eliminated** (verified: the production renderer bundle contains
+    zero "SIMULATED static" / "simulated shell" strings).
+  - **Fail loud, never simulate:** when the real app has no bridge,
+    `src/renderer/main.tsx` renders a full-screen **"FATAL: preload bridge
+    missing — build is broken"** error instead of the UI. (That string is present
+    in the production bundle as the error path.)
+  - `tests/mock-bridge-gating.test.ts` pins all four cases (real / mock / fatal-in-
+    Electron / fatal-in-real-build) and the Electron user-agent detection.
+- **Verification (Linux sandbox):**
+  - Built preload requires only `electron`: `grep` of `dist-electron/electron/preload.js`
+    shows a single `require("electron")` (contracts appears only in comments).
+  - Executing the **built** preload as CommonJS with a mocked `electron` module
+    runs to completion and calls `exposeInMainWorld('selfconnect', api)` with all
+    **15** methods — i.e. the exact step that previously threw now succeeds.
+  - Production renderer bundle: **0** occurrences of the mock banner / simulated-
+    shell strings; the fatal-error string **is** present. The
+    `SELFCONNECT_PREVIEW=1` preview bundle still contains the mock (preview
+    unaffected).
+  - A full GUI `npm start` launch could not be exercised here: headless Electron
+    under `xvfb-run` fails to paint even a `data:` URL in this sandbox (renderer
+    process cannot create a surface). The window/GUI launch remains
+    **[UNVERIFIED ON WINDOWS]**, but the bridge wiring — the actual subject of
+    Problem 7 — is proven by the preload-execution and bundle checks above.
+  - `npm run typecheck` clean; `npm test` **244 passed** (236 prior + 8 new).
+- **Status:** FIXED (durable). After this fix, the real app must show the **real
+  daemon banner**; **any SIMULATED text inside Electron now means a broken build**,
+  and the app says so on a fatal screen rather than pretending to work.
 
 ---
 

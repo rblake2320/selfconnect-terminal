@@ -1395,14 +1395,44 @@ export function createMockBridge(): SelfConnectApi {
   };
 }
 
+/** True when this renderer is running inside Electron (real app), not a browser. */
+export function isRunningUnderElectron(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  return /electron/i.test(navigator.userAgent);
+}
+
+export type BridgeMode =
+  | 'real' // window.selfconnect provided by the Electron preload — use it.
+  | 'mock' // browser-preview build, not Electron — simulated bridge installed.
+  | 'fatal'; // real app but the preload bridge is missing — build is broken.
+
 /**
- * Install the mock bridge if (and only if) the real Electron bridge is absent.
- * Returns true when the mock was installed (i.e. we are in browser preview).
+ * Decide how the renderer should obtain its bridge, and install the mock only
+ * when that is unambiguously safe.
+ *
+ * HARD RULE (Problem 7): the mock must NEVER activate inside Electron. Even if
+ * the preload silently failed and left window.selfconnect undefined, we must
+ * NOT paper over it with a simulation — that is exactly the bug where the real
+ * app rendered the SIMULATED preview. So:
+ *
+ *   - real bridge present                  -> 'real'  (use it)
+ *   - preview build AND not Electron       -> 'mock'  (install simulation)
+ *   - anything else with no real bridge    -> 'fatal' (caller shows error screen)
+ *
+ * `__SELFCONNECT_PREVIEW__` is a compile-time constant: false in the Electron
+ * bundle, so this whole mock path is dead-code-eliminated from the real app.
  */
-export function installMockBridgeIfNeeded(): boolean {
-  if (typeof window === 'undefined') return false;
-  if (window.selfconnect) return false;
-  window.selfconnect = createMockBridge();
-  startStreaming();
-  return true;
+export function installMockBridgeIfNeeded(): BridgeMode {
+  if (typeof window === 'undefined') return 'fatal';
+  if (window.selfconnect) return 'real';
+
+  const previewBuild = typeof __SELFCONNECT_PREVIEW__ !== 'undefined' && __SELFCONNECT_PREVIEW__;
+  if (previewBuild && !isRunningUnderElectron()) {
+    window.selfconnect = createMockBridge();
+    startStreaming();
+    return 'mock';
+  }
+
+  // Real app (or any non-preview build) with no preload bridge: do not simulate.
+  return 'fatal';
 }

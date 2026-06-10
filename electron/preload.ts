@@ -1,18 +1,45 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type { SelfConnectApi } from './ipc-contract';
-import {
-  IPC,
-  type BusEvent,
-  type ReviewResult,
-  type UiState,
-  type ChainStatus,
-  type SlashResult,
-  type PermissionMode,
-  type SessionSummary,
-  type ResumeResult,
-  type LedgerEntry,
-  type LabReport,
+import type {
+  BusEvent,
+  ReviewResult,
+  UiState,
+  ChainStatus,
+  SlashResult,
+  PermissionMode,
+  SessionSummary,
+  ResumeResult,
+  LedgerEntry,
+  LabReport,
 } from '../src/shared/contracts';
+
+/**
+ * IPC channel names are INLINED here (not imported from ../src/shared/contracts)
+ * on purpose. This preload runs under `sandbox: true`, where Electron's
+ * restricted `require` resolves only `electron` and a few polyfilled builtins —
+ * NOT arbitrary relative file-path modules. A runtime `require("../src/shared/
+ * contracts")` throws inside the sandbox, aborting the preload before
+ * contextBridge.exposeInMainWorld runs, leaving window.selfconnect undefined.
+ * These values MUST stay byte-for-byte identical to IPC in src/shared/contracts.ts
+ * (a test asserts this).
+ */
+const IPC = {
+  ptyInput: 'pty:input',
+  ptyResize: 'pty:resize',
+  reviewRun: 'review:run',
+  approvalDecide: 'approval:decide',
+  localOnlySet: 'localonly:set',
+  ledgerVerify: 'ledger:verify',
+  stateSnapshot: 'state:snapshot',
+  slashRun: 'slash:run',
+  permissionModeSet: 'permission:set',
+  sessionsList: 'sessions:list',
+  sessionResume: 'session:resume',
+  replayEvents: 'replay:events',
+  labLatest: 'lab:latest',
+  busEvent: 'bus:event',
+  ptyData: 'pty:data',
+} as const;
 
 /**
  * Preload. Runs with context isolation; exposes ONLY the narrow typed API

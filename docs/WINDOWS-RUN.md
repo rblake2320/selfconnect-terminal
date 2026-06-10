@@ -7,8 +7,10 @@ app + real daemon on a fresh Windows 11 machine. No mocks.
 > Windows 11 run (Node v24, VS 2022 BuildTools, RTX 5090 box) has now happened.
 > The following are **VERIFIED ON WINDOWS**: `npm install` (via a C: cache),
 > `node-pty` rebuilt against the **Electron 31 ABI**, a real **ConPTY smoke test**
-> (`NODE_PTY_OK ... sawData=true`), and **236/236 tests passing natively**. Six
-> first-run problems were found and all have durable fixes now in the repo — see
+> (`NODE_PTY_OK ... sawData=true`), and **all tests passing natively**. Six
+> first-run problems — plus a seventh (the built Electron app rendered the
+> SIMULATED preview because the sandboxed preload's bridge failed to load) — were
+> found and all have durable fixes now in the repo — see
 > `docs/WINDOWS-FINDINGS.md` and the Troubleshooting section below. Anything still
 > not exercised from any machine is flagged **[UNVERIFIED ON WINDOWS]** (e.g. the
 > Electron *window/GUI* launch itself). The RTX 5090 is **not used by this app**
@@ -171,6 +173,15 @@ npm start
 This runs `electron .` against the built `dist-electron/electron/main.js`. The
 window should open with the terminal pane on the left, the live widget dock on
 the right, and a `selfconnect:~/workspace$`-style prompt in a **real** PTY.
+
+> **The real app shows the real daemon banner.** If you instead see a banner that
+> says **"SIMULATED static preview … faked client-side (no real PTY, daemon, or
+> model providers)"** or commands return **"(simulated shell — try 'help')"**,
+> that is a **broken build**, not a preview — see Troubleshooting →
+> "Electron window shows the SIMULATED preview". After the Problem 7 fix the app
+> will **never** silently simulate inside Electron: if the preload bridge is
+> missing it renders a full-screen **"FATAL: preload bridge missing — build is
+> broken"** instead. Any SIMULATED text inside Electron = broken build.
 
 > **Partly verified.** The **ConPTY-backed shell** layer is **VERIFIED ON
 > WINDOWS** — the `scripts/pty-smoke.js` test spawned a real ConPTY child under
@@ -341,6 +352,31 @@ on-disk hash-chained ledger at `./data/selfconnect-ledger.jsonl`.
     (expect `NODE_PTY_OK ... sawData=true`).
   - The installed Electron major must match `package.json` (**31**). If you
     bumped Electron, rebuild again.
+
+### Electron window shows the SIMULATED preview (no real daemon) — Problem 7
+- **Symptom:** the built app launches but shows the **browser-preview
+  simulation**: banner "SIMULATED static preview …", commands return
+  "(simulated shell — try 'help')". `window.selfconnect` from the preload is
+  undefined and the renderer fell back to the mock.
+- **Root cause:** a preload that does a runtime `require` of a relative module
+  (e.g. `../src/shared/contracts`) **fails silently under `sandbox: true`** —
+  Electron's sandboxed preload can only `require('electron')` and a few builtins,
+  so the require throws and the preload aborts before exposing the bridge.
+- **Fix (already in repo):** `electron/preload.ts` inlines its IPC constants and
+  imports everything else as `import type`, so the built preload requires only
+  `electron`. The mock is now gated to the preview build **and** non-Electron
+  only, and the real app shows a **"FATAL: preload bridge missing"** screen rather
+  than simulating. If you ever see the simulation in Electron again:
+  ```powershell
+  # 1) the built preload must require ONLY electron:
+  Select-String -Path dist-electron\electron\preload.js -Pattern 'require\("'
+  #    -> should show only require("electron")
+  # 2) the production renderer bundle must NOT contain the mock banner:
+  Select-String -Path dist\renderer\assets\*.js -Pattern 'SIMULATED static'
+  #    -> should find nothing
+  ```
+  If either check fails, your `dist-electron`/`dist` is stale — re-run
+  `npm run build`. Full write-up: `docs/WINDOWS-FINDINGS.md` → Problem 7.
 
 ### Electron sandbox / window won't open
 - **Symptom:** the process starts but no window, or a GPU/sandbox error in the

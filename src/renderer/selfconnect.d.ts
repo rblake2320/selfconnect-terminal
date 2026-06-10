@@ -37,4 +37,12 @@ declare global {
   interface Window {
     selfconnect: SelfConnectApi;
   }
+
+  /**
+   * Compile-time flag injected by Vite (see vite.config.ts `define`). True ONLY
+   * in the static browser-preview build (SELFCONNECT_PREVIEW=1). The real
+   * Electron renderer bundle is built with this false, so the simulated mock
+   * bridge is dead-code-eliminated and can never run inside the app.
+   */
+  const __SELFCONNECT_PREVIEW__: boolean;
 }
