@@ -99,6 +99,77 @@ approval like any cloud call; redaction runs before any warm fact can leave).
 
 ---
 
+## What's new in v3b — Trust Layer
+
+v3b makes **identity, authority, and provenance** cryptographic. Every agent
+gets an Ed25519 keypair; every consequential record can be signed and
+independently verified; and the daemon **refuses** any action whose authority
+does not chain back to a human grant. As always, **everything flows through the
+same identity-stamped bus → hash-chained ledger**, and **private keys never
+leave the daemon** (`./data/keys/`, mode `0600`) — only raw public keys (hex)
+and detached signatures (hex) ever cross a boundary. The renderer stays
+untrusted.
+
+- **Agent identity keys (B2.1)** — an Ed25519 keypair per `agentId`, minted on
+  first use in the daemon keystore. Outbound A2A (BPC) envelopes are signed; a
+  bad signature on receive is a `risk.detected` (high) and the envelope is
+  rejected. The signature is **excluded** from the envelope hash so the chain
+  and the signature are independent checks.
+- **Signed ledger checkpoints (B)** — the daemon periodically seals the ledger
+  head `(seq, hash, entries, ts)` with the system key, turning the SHA‑256 chain
+  into a **signed** chain robust to file substitution. `selfconnect ledger
+  verify` checks **both** the hash chain and every checkpoint signature.
+- **Delegation certificate chains (B2.2)** — scoped capability grants
+  `{grantee, tools, spend budget, expiry, data classes}` signed by the parent
+  identity, chaining to a **human root grant** (created at session start,
+  `humanApproved`). Scope **composes by intersection** down the chain. The Tool
+  Layer and A2A path call into the daemon, which **refuses** any action that is
+  missing a grant, expired, over-tools, over-budget, or over-class — recording a
+  `delegation.denied` event. Surfaced as the `delegate_grant` / `grants_list`
+  tools and `/delegate`, `/grants` slash commands.
+- **Agent passport (B2.3)** — an exportable, signed work-history summary
+  (sessions, tool calls, spend, risk findings, approval compliance) backed by a
+  **Merkle hash-tree** over the covered ledger events. The root is third-party
+  verifiable without revealing content, and **single leaves can be selectively
+  revealed** with an inclusion proof. CLI: `selfconnect passport export|verify`.
+- **Metering receipts (B2.4)** — per-agent resource accounting (tool calls,
+  spend, tokens) in the Cost Kernel; A2A envelopes may carry a **signed metering
+  receipt** alongside the signature.
+- **Evidence bundle (B)** — `selfconnect evidence export <sessionId>` writes a
+  self-contained **ZIP** (pure-Node store encoder, no dependency) with the ledger
+  slice, signed checkpoints, public keys, and a verification report.
+- **Flight recorder (B)** — a renderer **Replay panel** scrubs any past
+  session's ledger events on a timeline (terminal lines, tool calls, approvals,
+  risk, delegation, checkpoints). Export a signed `.screplay` bundle and verify
+  it offline with `selfconnect replay verify <file>`.
+- **New slash commands** — `/delegate <agent>`, `/grants`, `/passport`,
+  `/replay`.
+
+### IETF agent-audit-trail conformance mapping
+
+Behind a conformance flag (`selfconnect ledger export --ietf`), each native
+ledger entry maps onto a **draft-sharif-agent-audit-trail-00**-style audit
+record. The native shape stays authoritative; the mapping is a non-lossy
+projection that preserves hash linkage. (We implement a sensible mapping from
+the draft's described structure; we do not vendor the draft text.)
+
+| SelfConnect ledger field | IETF audit-trail field      | Notes                                        |
+| ------------------------ | --------------------------- | -------------------------------------------- |
+| `seq`                    | `recordId`                  | monotonic index within the trail             |
+| `ts` (epoch ms)          | `time` (RFC3339)            | converted to ISO‑8601                        |
+| `type`                   | `action` + `eventType`      | coarse category + preserved native type      |
+| `agentId`                | `actor.id` / `actor.type`   | `human` / `system` / `agent` inferred        |
+| `sessionId`, `runId`     | `context`                   | logical grouping                             |
+| `payload`                | `attributes`                | redaction-safe, free-form                    |
+| `hash`, `prevHash`       | `hash`, `prevHash`          | tamper-evident linkage carried through       |
+
+Action categories: `invoke` (tool/MCP), `communicate` (A2A), `decide`
+(routing/policy), `authorize` (approval/delegation/grant), `attest`
+(signing/checkpoint/passport/evidence), `lifecycle` (run/agent/session),
+`observe` (telemetry).
+
+---
+
 ## Architecture
 
 ```
@@ -214,6 +285,15 @@ selfconnect review security      # run the read-only review agent
 selfconnect tools                # list governed tools
 selfconnect slash "/cost"        # run a slash command
 selfconnect mcp serve            # run as a read-only MCP server (stdio)
+
+# v3b — Trust Layer
+selfconnect ledger verify              # hash chain AND every checkpoint signature
+selfconnect ledger export --ietf       # audit trail in IETF conformance shape
+selfconnect passport export pass.json  # signed Merkle work-history passport
+selfconnect passport verify pass.json  # verify a passport offline
+selfconnect evidence export <sid>      # compliance ZIP (ledger + checkpoints + pubkeys + report)
+selfconnect replay export <sid>        # signed .screplay session bundle
+selfconnect replay verify file.screplay
 ```
 
 ```ts

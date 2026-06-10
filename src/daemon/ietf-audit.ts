@@ -94,7 +94,8 @@ export function ietfAction(type: EventType): IetfAction {
 function actorType(agentId: string | undefined): 'agent' | 'human' | 'system' {
   if (!agentId) return 'system';
   if (agentId === 'human') return 'human';
-  if (agentId.endsWith('system') || agentId === 'system') return 'system';
+  // The system agent is named 'system' or stamped 'agent_system[_<suffix>]'.
+  if (agentId === 'system' || /(^|_)system(_|$)/.test(agentId)) return 'system';
   return 'agent';
 }
 

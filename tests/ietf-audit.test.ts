@@ -43,6 +43,8 @@ describe('IETF draft-sharif-agent-audit-trail mapping (B)', () => {
     expect(toIetfAuditEvent(entry(0, 'grant.root', 'human')).actor.type).toBe('human');
     expect(toIetfAuditEvent(entry(1, 'checkpoint.signed', 'system')).actor.type).toBe('system');
     expect(toIetfAuditEvent(entry(2, 'tool.call', undefined)).actor.type).toBe('system');
+    expect(toIetfAuditEvent(entry(3, 'run.start', 'agent_system_06898889')).actor.type).toBe('system');
+    expect(toIetfAuditEvent(entry(4, 'tool.call', 'agent_worker')).actor.type).toBe('agent');
   });
 
   it('maps a whole trail in order', () => {
