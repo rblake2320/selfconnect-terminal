@@ -911,22 +911,23 @@ export class Daemon {
   // -- Trust layer (B2.1–B2.4, B) ------------------------------------------
 
   /**
-   * Authorize an agent action against its delegation chain (B2.2). Agents
-   * without an explicit grant fall back to the system agent's root authority;
-   * any other agent must hold a chain terminating at the human root. A denial
-   * is recorded as `delegation.denied` and surfaces its reason as steering.
+   * Authorize an agent action against its delegation chain (B2.2). The trusted
+   * core actors (system/tool/shell/review/router) ride the session's human root
+   * grant directly. EVERY other actor must hold its own chain terminating at the
+   * human root — an actor with no grant is refused (no implicit escalation to
+   * system authority). A denial is recorded as `delegation.denied` and its
+   * reason doubles as steering text.
    */
   authorizeDelegation(
     agent: string,
     action: { tool?: string; spendUsd?: number; dataClass?: DataClass },
   ): DelegationVerdict {
     const systemAgent = this.identity.agent('system');
-    const agentId = agent === 'system' || agent === 'tool' || agent === 'shell' ? systemAgent : agent;
-    // The system agent rides the session root grant directly.
-    const grantee = this.delegation.latestFor(agentId) ? agentId : systemAgent;
+    const CORE = new Set(['system', 'tool', 'shell', 'review', 'router']);
+    const grantee = CORE.has(agent) ? systemAgent : agent;
     const verdict = this.delegation.authorize(grantee, action);
     if (!verdict.ok) {
-      this.record('delegation.denied', { agent: agentId, action, reason: verdict.reason }, 'system');
+      this.record('delegation.denied', { agent, action, reason: verdict.reason }, 'system');
     }
     return verdict;
   }
