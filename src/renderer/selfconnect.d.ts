@@ -8,6 +8,7 @@ import type {
   SessionSummary,
   ResumeResult,
   LedgerEntry,
+  LabReport,
 } from '../shared/contracts';
 
 /**
@@ -27,6 +28,7 @@ export interface SelfConnectApi {
   listSessions(): Promise<SessionSummary[]>;
   resumeSession(sessionId: string): Promise<ResumeResult>;
   replayEvents(sessionId?: string): Promise<LedgerEntry[]>;
+  labLatest(): Promise<LabReport | null>;
   onPtyData(handler: (data: string) => void): () => void;
   onBusEvent(handler: (evt: BusEvent) => void): () => void;
 }

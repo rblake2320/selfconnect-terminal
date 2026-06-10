@@ -4,6 +4,7 @@ import { TerminalView } from './TerminalView';
 import { ApprovalsPanel } from './ApprovalsPanel';
 import { ReviewMascot } from './widgets/ReviewMascot';
 import { ReplayPanel } from './widgets/ReplayPanel';
+import { LabPanel } from './widgets/LabPanel';
 import {
   CostKernelWidget,
   ContextGaugeWidget,
@@ -18,6 +19,12 @@ import {
 
 const POLL_MS = 1500;
 const MAX_FEED = 200;
+
+/** Pull a confidence score (0-1) off an event payload, if present (E6). */
+function confidenceOf(evt: BusEvent): number | null {
+  const p = evt.payload as { confidence?: unknown } | undefined;
+  return typeof p?.confidence === 'number' ? p.confidence : null;
+}
 
 export function App(): React.JSX.Element {
   const [state, setState] = useState<UiState | null>(null);
@@ -100,13 +107,27 @@ export function App(): React.JSX.Element {
           <TerminalView />
           {showFeed && (
             <div className="event-feed">
-              {feed.map((e) => (
-                <div key={e.id} className="feed-row">
-                  <span className="mono muted">{new Date(e.ts).toLocaleTimeString()}</span>
-                  <span className="feed-type">{e.type}</span>
-                  <span className="mono muted">{e.runId?.slice(0, 12)}</span>
-                </div>
-              ))}
+              {feed.map((e) => {
+                const conf = confidenceOf(e);
+                const escalated = e.type === 'confidence.escalated';
+                return (
+                  <div key={e.id} className="feed-row">
+                    <span className="mono muted">{new Date(e.ts).toLocaleTimeString()}</span>
+                    <span className="feed-type">{e.type}</span>
+                    {conf !== null && (
+                      <span
+                        className={`conf-badge${
+                          escalated ? ' conf-escalated' : conf < 0.5 ? ' conf-low' : ''
+                        }`}
+                        title={escalated ? 'low confidence — escalated' : 'reported confidence'}
+                      >
+                        {(conf * 100).toFixed(0)}%
+                      </span>
+                    )}
+                    <span className="mono muted">{e.runId?.slice(0, 12)}</span>
+                  </div>
+                );
+              })}
             </div>
           )}
         </section>
@@ -128,6 +149,7 @@ export function App(): React.JSX.Element {
               <TodoWidget todos={state.todos} />
               <SessionsWidget sessions={state.sessions} onResume={onResumeSession} />
               <ReplayPanel />
+              <LabPanel />
             </>
           )}
         </aside>

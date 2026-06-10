@@ -8,6 +8,7 @@ import type {
   SessionSummary,
   ResumeResult,
   LedgerEntry,
+  LabReport,
 } from '../src/shared/contracts';
 
 /**
@@ -41,6 +42,8 @@ export interface SelfConnectApi {
   resumeSession(sessionId: string): Promise<ResumeResult>;
   /** v3b: read-only ledger slice for the flight-recorder replay panel. */
   replayEvents(sessionId?: string): Promise<LedgerEntry[]>;
+  /** v3c: the most recent harness-lab report (D6), or null. */
+  labLatest(): Promise<LabReport | null>;
   /** Subscribe to raw PTY byte stream. Returns an unsubscribe fn. */
   onPtyData(handler: (data: string) => void): () => void;
   /** Subscribe to identity-stamped bus events. Returns an unsubscribe fn. */

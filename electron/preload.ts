@@ -11,6 +11,7 @@ import {
   type SessionSummary,
   type ResumeResult,
   type LedgerEntry,
+  type LabReport,
 } from '../src/shared/contracts';
 
 /**
@@ -54,6 +55,9 @@ const api: SelfConnectApi = {
   },
   replayEvents(sessionId?: string): Promise<LedgerEntry[]> {
     return ipcRenderer.invoke(IPC.replayEvents, { sessionId }) as Promise<LedgerEntry[]>;
+  },
+  labLatest(): Promise<LabReport | null> {
+    return ipcRenderer.invoke(IPC.labLatest) as Promise<LabReport | null>;
   },
   onPtyData(handler: (data: string) => void): () => void {
     const listener = (_e: unknown, data: string) => handler(data);

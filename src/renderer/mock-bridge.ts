@@ -26,6 +26,9 @@ import type {
   MeteringRecord,
   DelegationCert,
   LedgerEntry,
+  LabReport,
+  LabArmScore,
+  SimulationPreview,
 } from '../shared/contracts';
 import type { SelfConnectApi } from './selfconnect.d';
 
@@ -110,6 +113,8 @@ interface SimState {
   metering: MeteringRecord[];
   grants: DelegationCert[];
   checkpoints: number;
+  lab: LabReport | null;
+  confidenceThreshold: number;
   startedAtMs: number;
 }
 
@@ -211,6 +216,8 @@ const sim: SimState = {
     },
   ],
   checkpoints: 3,
+  lab: null,
+  confidenceThreshold: 0.5,
   startedAtMs: Date.now(),
 };
 
@@ -385,6 +392,8 @@ function snapshot(): UiState {
     metering: sim.metering,
     grants: sim.grants,
     checkpoints: sim.checkpoints,
+    lab: sim.lab,
+    confidenceThreshold: sim.confidenceThreshold,
   };
 }
 
@@ -543,6 +552,10 @@ const SLASH_HELP = [
   '  /grants               list delegation grants + chain status',
   '  /passport             export a signed Merkle work-history passport',
   '  /replay               flight-recorder timeline of this session',
+  '  /lab [run|report]     harness lab: compare arms, scored from the ledger',
+  '  /simulate <tool>      dry-run a mutating tool (predicted effects only)',
+  '  /consult <question>   second opinion from a different model (gated)',
+  '  /escalate             demo: low-confidence action escalated to approval',
   '  /clear                clear the terminal view',
 ].join('\n');
 
@@ -797,6 +810,74 @@ function mockSlash(line: string): SlashResult {
         ].join('\n'),
       };
     }
+    case 'lab': {
+      const sub = (args[0] || 'run').toLowerCase();
+      const report = demoLabReport();
+      sim.lab = report;
+      emit('lab.run', { task: report.task, arms: report.scores.map((s) => s.arm) });
+      for (const s of report.scores) {
+        emit('lab.arm', { arm: s.arm, runId: s.runId, wallTimeMs: s.wallTimeMs, verifyExitCode: s.verifyExitCode });
+      }
+      emit('lab.scored', { task: report.task, arms: report.scores.length });
+      if (sub === 'report') {
+        return { ok: true, output: `re-scored ${report.scores.length} arm(s) from the ledger:\n${renderLabTable(report)}` };
+      }
+      return {
+        ok: true,
+        output: [
+          `lab: ${report.task}  (2 arms, isolated runIds, scored from the ledger)`,
+          renderLabTable(report),
+          '',
+          'open the Harness Lab panel for the live comparison table.',
+        ].join('\n'),
+      };
+    }
+    case 'simulate': {
+      const tool = args[0] || 'write_file';
+      const preview = demoPreview(tool, rest.slice(tool.length).trim() || 'src/app.ts');
+      emit('tool.simulated', { tool, mutating: true, risk: preview.risk ?? 'low' });
+      // Attach the preview to an approval so the human approves evidence, not a promise.
+      requestSimulatedApproval(preview);
+      return {
+        ok: true,
+        output: [
+          `dry-run (${tool}) — nothing executed:`,
+          `  ${preview.summary}`,
+          preview.filesTouched.length ? `  touches: ${preview.filesTouched.join(', ')}` : '',
+          preview.diff ? `  diff:\n${preview.diff.split('\n').map((l) => '    ' + l).join('\n')}` : '',
+          preview.risk ? `  risk: ${preview.risk} (${preview.riskReason ?? ''})` : '',
+          '',
+          'preview attached to a pending approval — approve the evidence below.',
+        ]
+          .filter(Boolean)
+          .join('\n'),
+      };
+    }
+    case 'consult': {
+      const q = rest || 'Is this migration safe to apply under concurrent writes?';
+      emit('consult.requested', {
+        provider: 'anthropic',
+        model: 'claude-sonnet-4-5',
+        tier: 'cloud',
+        estimatedCostUsd: 0.0089,
+        redactionCount: 2,
+      });
+      // A genuine second opinion comes back with its own confidence + critique.
+      const critique =
+        'Second opinion (anthropic/claude-sonnet-4-5): the backfill default is applied ' +
+        'in a separate transaction, so concurrent writers can still insert NULLs in the ' +
+        'window before the NOT NULL constraint lands. Recommend a 3-step online migration.';
+      emit('consult.result', { ok: true, provider: 'anthropic', model: 'claude-sonnet-4-5', confidence: 0.66, critique: `[${critique.length} chars]`, redactionCount: 2 });
+      emit('confidence.reported', { tool: 'consult', confidence: 0.66, rationale: 'cross-model critique' });
+      return { ok: true, output: [`consult: ${q}`, '', critique].join('\n') };
+    }
+    case 'escalate': {
+      // Demo: a low-confidence, high-blast-radius action gets escalated to approval.
+      emit('confidence.reported', { tool: 'bash', confidence: 0.21, rationale: 'unsure about destructive flags' });
+      emit('confidence.escalated', { tool: 'bash', confidence: 0.21, threshold: 0.5, highBlastRadius: true, reason: 'low confidence on high-blast-radius action — human approval required' });
+      requestSimulatedApproval(demoPreview('bash', 'rm -rf build/'));
+      return { ok: true, output: 'low-confidence bash escalated to human approval (see pending approval).' };
+    }
     case 'clear':
       return { ok: true, output: '', clear: true };
     default:
@@ -941,6 +1022,99 @@ function requestDemoApproval(): void {
   emit('approval.requested', req);
 }
 
+/** v3c E5: a pending approval that carries a dry-run simulation preview. */
+function requestSimulatedApproval(preview: SimulationPreview): void {
+  const now = Date.now();
+  const req: ApprovalRequest = {
+    id: `appr_sim_${Math.random().toString(36).slice(2, 8)}`,
+    kind: 'cloud-send',
+    summary: `${preview.tool}: ${preview.summary}`,
+    provider: 'anthropic',
+    model: 'tool',
+    estimatedCostUsd: preview.estimatedCostUsd,
+    createdAt: now,
+    expiresAt: now + 120_000,
+    status: 'pending',
+    preview,
+  };
+  sim.approvals = [req];
+  emit('approval.requested', req);
+}
+
+/** v3c D6: a fake 2-arm lab comparison for the preview demo. */
+function demoLabReport(): LabReport {
+  const scores: LabArmScore[] = [
+    {
+      arm: 'baseline',
+      runId: 'run_baseline',
+      turns: 9,
+      totalTokens: 18420,
+      cacheHitPct: 22.0,
+      toolErrorRate: 11.1,
+      approvalsTriggered: 1,
+      wallTimeMs: 8400,
+      success: true,
+      verifyExitCode: 0,
+    },
+    {
+      arm: 'dedup+small-window',
+      runId: 'run_dedup',
+      turns: 7,
+      totalTokens: 11270,
+      cacheHitPct: 48.0,
+      toolErrorRate: 0.0,
+      approvalsTriggered: 1,
+      wallTimeMs: 6100,
+      success: true,
+      verifyExitCode: 0,
+    },
+  ];
+  return { task: 'fix-failing-test', sessionId: SESSION_ID, ranAt: Date.now(), scores };
+}
+
+/** Render a lab report as a CLI-style table (mirrors daemon renderComparison). */
+function renderLabTable(report: LabReport): string {
+  const headers = ['arm', 'turns', 'tokens', 'cache%', 'err%', 'appr', 'ms', 'ok'];
+  const rows = report.scores.map((s) => [
+    s.arm,
+    String(s.turns),
+    String(s.totalTokens),
+    s.cacheHitPct.toFixed(1),
+    s.toolErrorRate.toFixed(1),
+    String(s.approvalsTriggered),
+    String(s.wallTimeMs),
+    s.success ? 'PASS' : 'FAIL',
+  ]);
+  const widths = headers.map((h, i) => Math.max(h.length, ...rows.map((r) => r[i].length)));
+  const fmt = (cells: string[]): string => cells.map((c, i) => c.padEnd(widths[i])).join('  ');
+  return [fmt(headers), fmt(widths.map((w) => '-'.repeat(w))), ...rows.map(fmt)].join('\n');
+}
+
+/** v3c E5: a fake dry-run preview for the /simulate demo. */
+function demoPreview(tool: string, target: string): SimulationPreview {
+  if (tool === 'bash') {
+    return {
+      tool: 'bash',
+      mutating: false,
+      summary: `would run: ${target}`,
+      filesTouched: [],
+      estimatedCostUsd: 0,
+      risk: 'critical',
+      riskReason: 'recursive delete (destructive)',
+    };
+  }
+  return {
+    tool,
+    mutating: true,
+    summary: `overwrite ${target} (2 hunks)`,
+    filesTouched: [target],
+    estimatedCostUsd: 0,
+    diff: ['- const TIMEOUT = 1000;', '+ const TIMEOUT = 5000;', '+ const RETRIES = 3;'].join('\n'),
+    risk: 'medium',
+    riskReason: 'edits source under src/',
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Review flow: snapshot -> redact -> route -> review
 // ---------------------------------------------------------------------------
@@ -1080,6 +1254,9 @@ export function createMockBridge(): SelfConnectApi {
     },
     async replayEvents(_sessionId?: string): Promise<LedgerEntry[]> {
       return mockReplayEvents();
+    },
+    async labLatest(): Promise<LabReport | null> {
+      return sim.lab;
     },
     onPtyData(handler: (data: string) => void): () => void {
       ptyHandlers.add(handler);

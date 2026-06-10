@@ -26,6 +26,23 @@ export function ApprovalsPanel(props: {
               <span>~${a.estimatedCostUsd.toFixed(4)}</span>
               <span className="approval-timer">{secs}s</span>
             </div>
+            {a.preview && (
+              <div className="approval-preview">
+                <div className="approval-preview-head mono muted">
+                  dry-run: {a.preview.summary}
+                  {a.preview.risk && (
+                    <span className={`tag tag-risk-${a.preview.risk}`}>{a.preview.risk}</span>
+                  )}
+                </div>
+                {a.preview.filesTouched.length > 0 && (
+                  <div className="mono muted">touches: {a.preview.filesTouched.join(', ')}</div>
+                )}
+                {a.preview.diff && <pre className="approval-diff mono">{a.preview.diff}</pre>}
+                {a.preview.estimatedCostUsd > 0 && (
+                  <div className="mono muted">est ${a.preview.estimatedCostUsd.toFixed(4)}</div>
+                )}
+              </div>
+            )}
             <div className="approval-actions">
               <button className="btn btn-approve" onClick={() => props.onDecide(a.id, true)}>
                 Approve
