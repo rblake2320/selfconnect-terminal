@@ -992,7 +992,7 @@ export class Daemon {
 
   /** Build + sign an exportable passport over this session's ledger (B2.3). */
   exportPassport(sessionId?: string): Passport {
-    const sid = sessionId ?? this.identity.sessionId;
+    const sid = sessionId && sessionId.length ? sessionId : this.identity.sessionId;
     const events = this.ledger.all().filter((e) => !e.sessionId || e.sessionId === sid);
     const agentId = this.identity.agent('system');
     this.keystore.ensure(agentId);
@@ -1023,7 +1023,7 @@ export class Daemon {
 
   /** Build a signed session replay bundle (.screplay) (B flight recorder). */
   exportReplay(sessionId?: string): ReplayBundle {
-    const sid = sessionId ?? this.identity.sessionId;
+    const sid = sessionId && sessionId.length ? sessionId : this.identity.sessionId;
     const events = this.ledger.all().filter((e) => !e.sessionId || e.sessionId === sid);
     const seqs = new Set(events.map((e) => e.seq));
     const checkpoints = this.ledgerCheckpoints.all().filter((c) => seqs.has(c.seq));
@@ -1046,7 +1046,7 @@ export class Daemon {
 
   /** Build a compliance evidence bundle for a session (B). */
   exportEvidence(sessionId?: string): ReturnType<typeof buildEvidenceBundle> {
-    const sid = sessionId ?? this.identity.sessionId;
+    const sid = sessionId && sessionId.length ? sessionId : this.identity.sessionId;
     const events = this.ledger.all().filter((e) => !e.sessionId || e.sessionId === sid);
     const seqs = new Set(events.map((e) => e.seq));
     const checkpoints = this.ledgerCheckpoints.all().filter((c) => seqs.has(c.seq));

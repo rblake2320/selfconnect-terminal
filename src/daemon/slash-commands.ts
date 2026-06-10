@@ -47,6 +47,9 @@ const COMMANDS: CommandSpec[] = [
   { name: 'limits', usage: '/limits', summary: 'what this harness/model cannot do' },
   { name: 'knowledge', usage: '/knowledge', summary: 'show distilled session knowledge (WARM tier)' },
   { name: 'playbooks', usage: '/playbooks <situation>', summary: 'load matching playbooks' },
+  { name: 'delegate', usage: '/delegate <grantee> [tools=a,b] [budget=0.05] [ttl=3600] [class=public,internal]', summary: 'issue a scoped delegation grant' },
+  { name: 'grants', usage: '/grants [hash]', summary: 'list delegation grants (or verify one chain)' },
+  { name: 'passport', usage: '/passport [verify]', summary: 'export (or verify) a signed work-history passport' },
 ];
 
 function helpText(): string {
@@ -277,6 +280,15 @@ export async function dispatchSlash(daemon: Daemon, line: string): Promise<Slash
       return { ok: true, output: daemon.loadPlaybooks(rest) };
     }
 
+    case 'delegate':
+      return delegate(daemon, rest);
+
+    case 'grants':
+      return grants(daemon, rest);
+
+    case 'passport':
+      return passport(daemon, rest);
+
     default:
       return unknown(name);
   }
@@ -379,6 +391,91 @@ function todo(daemon: Daemon, rest: string): SlashResult {
     return { ok: true, output: `marked todo ${n} done` };
   }
   return { ok: false, output: 'usage: /todo [list|add <text>|done <n>]' };
+}
+
+const DATA_CLASSES = ['public', 'internal', 'secret', 'cui'] as const;
+type DataClassName = (typeof DATA_CLASSES)[number];
+
+/** Parse `key=value` flags out of an argument string, leaving positionals. */
+function parseFlags(rest: string): { positionals: string[]; flags: Record<string, string> } {
+  const tokens = rest.split(/\s+/).filter((t) => t.length > 0);
+  const positionals: string[] = [];
+  const flags: Record<string, string> = {};
+  for (const t of tokens) {
+    const eq = t.indexOf('=');
+    if (eq > 0) flags[t.slice(0, eq).toLowerCase()] = t.slice(eq + 1);
+    else positionals.push(t);
+  }
+  return { positionals, flags };
+}
+
+function delegate(daemon: Daemon, rest: string): SlashResult {
+  const { positionals, flags } = parseFlags(rest);
+  const grantee = positionals[0];
+  if (!grantee) {
+    return { ok: false, output: 'usage: /delegate <grantee> [tools=a,b] [budget=0.05] [ttl=<seconds>] [class=public,internal]' };
+  }
+  const tools = flags.tools ? flags.tools.split(',').map((s) => s.trim()).filter(Boolean) : undefined;
+  const budget = flags.budget !== undefined ? Number(flags.budget) : undefined;
+  const ttlSec = flags.ttl !== undefined ? Number(flags.ttl) : undefined;
+  const dataClasses = flags.class
+    ? (flags.class.split(',').map((s) => s.trim()).filter((s): s is DataClassName => (DATA_CLASSES as readonly string[]).includes(s)))
+    : undefined;
+  const cert = daemon.delegate({
+    grantee,
+    tools,
+    spendBudgetUsd: budget !== undefined && Number.isFinite(budget) ? budget : undefined,
+    expiresInMs: ttlSec !== undefined && Number.isFinite(ttlSec) ? ttlSec * 1000 : undefined,
+    dataClasses,
+  });
+  const verdict = daemon.verifyGrant(cert.hash);
+  return {
+    ok: true,
+    output: [
+      `issued grant ${cert.hash.slice(0, 16)} → ${grantee}`,
+      `  tools=[${cert.scope.tools.join(', ')}]  budget=$${cert.scope.spendBudgetUsd.toFixed(4)}  classes=[${cert.scope.dataClasses.join(', ')}]`,
+      `  expires=${cert.scope.expiresAt ? new Date(cert.scope.expiresAt).toISOString() : 'never'}`,
+      `  chain: ${verdict.ok ? 'VERIFIED to human root' : `INVALID — ${verdict.reason}`}`,
+    ].join('\n'),
+  };
+}
+
+function grants(daemon: Daemon, rest: string): SlashResult {
+  if (rest) {
+    const verdict = daemon.verifyGrant(rest);
+    return {
+      ok: true,
+      output: verdict.ok
+        ? `grant ${rest.slice(0, 16)}: VERIFIED to human root (chain length ${verdict.chain.length})`
+        : `grant ${rest.slice(0, 16)}: INVALID — ${verdict.reason}`,
+    };
+  }
+  const all = daemon.listGrants();
+  if (all.length === 0) return { ok: true, output: 'no delegation grants' };
+  const rows = all.map((c) => {
+    const root = c.parent === null && c.issuer === 'human' ? ' [human root]' : '';
+    return `  ${c.hash.slice(0, 16)}  ${c.issuer.slice(0, 18)} → ${c.grantee.slice(0, 18)}  tools=[${c.scope.tools.join(',')}]${root}`;
+  });
+  return { ok: true, output: ['Delegation grants:', ...rows].join('\n') };
+}
+
+function passport(daemon: Daemon, rest: string): SlashResult {
+  if (rest.trim().toLowerCase() === 'verify') {
+    const p = daemon.exportPassport();
+    const v = daemon.verifyPassportSig(p);
+    return { ok: true, output: `passport for ${p.agentId.slice(0, 18)}: signature ${v.ok ? 'VALID' : 'INVALID'} — ${v.reason}` };
+  }
+  const p = daemon.exportPassport();
+  return {
+    ok: true,
+    output: [
+      `Passport (signed work history) for ${p.agentId}:`,
+      `  sessions=${p.summary.sessions}  toolCalls=${p.summary.toolCalls}  spend=$${p.summary.spendUsd.toFixed(4)}`,
+      `  riskFindings=${p.summary.riskFindings}  approvals req/res=${p.summary.approvalsRequested}/${p.summary.approvalsResolved}`,
+      `  events=${p.summary.events}  merkleRoot=${p.merkleRoot.slice(0, 16)}…  leaves=${p.leafCount}`,
+      `  signature: ${p.signature.sigHex.slice(0, 16)}… (ed25519, third-party verifiable)`,
+    ].join('\n'),
+  };
 }
 
 /** Exposed for tests + /help generation. */

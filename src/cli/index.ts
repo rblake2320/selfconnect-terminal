@@ -16,8 +16,17 @@
  *   selfconnect tools                 list governed tools
  *   selfconnect slash "/cost"        run a slash command
  *   selfconnect mcp serve             run as a read-only MCP server (stdio)
+ *   selfconnect ledger verify         verify hash chain AND checkpoint signatures
+ *   selfconnect passport export|verify [file]
+ *   selfconnect evidence export [sessionId] [out.zip]
+ *   selfconnect replay export [sessionId] [out.screplay] | verify <file>
  */
+import { readFileSync, writeFileSync } from 'node:fs';
 import { SelfConnectClient } from '../sdk/index';
+import { zipStore, bundleFiles } from '../daemon/evidence';
+import { verifyReplayBundle } from '../daemon/replay';
+import { verifyPassport, verifyReveal } from '../daemon/passport';
+import { ReplayBundleSchema, PassportSchema } from '../shared/contracts';
 
 function print(line: string): void {
   process.stdout.write(line.endsWith('\n') ? line : line + '\n');
@@ -37,6 +46,10 @@ function usage(): void {
       '  tools                   list governed tools',
       '  slash <line>            run a slash command, e.g. slash "/cost"',
       '  mcp serve               run as a read-only MCP server over stdio',
+      '  ledger verify           verify hash chain AND every checkpoint signature',
+      '  passport export|verify  export or verify a signed work-history passport',
+      '  evidence export [sid]   write a compliance evidence bundle (.zip)',
+      '  replay export|verify    write or verify a signed .screplay session bundle',
     ].join('\n'),
   );
 }
@@ -126,6 +139,91 @@ export async function main(argv: string[]): Promise<number> {
         return 0; // server stays alive via stdin.resume()
       }
       print('usage: selfconnect mcp serve');
+      return 1;
+    }
+
+    case 'ledger': {
+      if (rest[0] !== 'verify') {
+        print('usage: selfconnect ledger verify');
+        return 1;
+      }
+      const report = client.daemon.verifyLedgerFull();
+      print(JSON.stringify(report, null, 2));
+      return report.chainOk && report.checkpointsOk ? 0 : 1;
+    }
+
+    case 'passport': {
+      const sub = rest[0];
+      if (sub === 'export') {
+        // Seal a checkpoint first so the passport covers a signed head.
+        client.daemon.sealCheckpoint();
+        const p = client.daemon.exportPassport();
+        const out = rest[1];
+        if (out) writeFileSync(out, JSON.stringify(p, null, 2), 'utf8');
+        print(out ? `wrote passport to ${out}` : JSON.stringify(p, null, 2));
+        return 0;
+      }
+      if (sub === 'verify') {
+        const file = rest[1];
+        if (!file) {
+          print('usage: selfconnect passport verify <file>');
+          return 1;
+        }
+        const parsed = PassportSchema.safeParse(JSON.parse(readFileSync(file, 'utf8')));
+        if (!parsed.success) {
+          print('passport: invalid file format');
+          return 1;
+        }
+        const v = verifyPassport(parsed.data);
+        print(`passport ${parsed.data.agentId}: ${v.ok ? 'VALID' : 'INVALID'} — ${v.reason}`);
+        void verifyReveal; // available for reveal verification
+        return v.ok ? 0 : 1;
+      }
+      print('usage: selfconnect passport export|verify [file]');
+      return 1;
+    }
+
+    case 'evidence': {
+      if (rest[0] !== 'export') {
+        print('usage: selfconnect evidence export [sessionId] [out.zip]');
+        return 1;
+      }
+      client.daemon.sealCheckpoint();
+      const sessionId = rest[1];
+      const bundle = client.daemon.exportEvidence(sessionId);
+      const out = rest[2] ?? `evidence-${bundle.sessionId}.zip`;
+      writeFileSync(out, zipStore(bundleFiles(bundle)));
+      print(`wrote evidence bundle to ${out} (entries=${bundle.report.entries}, checkpoints=${bundle.report.checkpoints}, chainOk=${bundle.report.chainOk}, checkpointsOk=${bundle.report.checkpointsOk})`);
+      return 0;
+    }
+
+    case 'replay': {
+      const sub = rest[0];
+      if (sub === 'export') {
+        client.daemon.sealCheckpoint();
+        const sessionId = rest[1];
+        const bundle = client.daemon.exportReplay(sessionId);
+        const out = rest[2] ?? `${bundle.sessionId}.screplay`;
+        writeFileSync(out, JSON.stringify(bundle, null, 2), 'utf8');
+        print(`wrote replay bundle to ${out} (${bundle.events.length} events, ${bundle.checkpoints.length} checkpoints)`);
+        return 0;
+      }
+      if (sub === 'verify') {
+        const file = rest[1];
+        if (!file) {
+          print('usage: selfconnect replay verify <file>');
+          return 1;
+        }
+        const parsed = ReplayBundleSchema.safeParse(JSON.parse(readFileSync(file, 'utf8')));
+        if (!parsed.success) {
+          print('replay: invalid bundle format');
+          return 1;
+        }
+        const v = verifyReplayBundle(parsed.data);
+        print(JSON.stringify(v, null, 2));
+        return v.ok ? 0 : 1;
+      }
+      print('usage: selfconnect replay export|verify [file]');
       return 1;
     }
 
