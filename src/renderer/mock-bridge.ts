@@ -407,18 +407,29 @@ let lineBuffer = '';
 function banner(): void {
   const lines = [
     '',
-    '\x1b[1;36m  ╔══════════════════════════════════════════════════════╗\x1b[0m',
-    '\x1b[1;36m  ║   SelfConnect Terminal — BROWSER PREVIEW (simulated) ║\x1b[0m',
-    '\x1b[1;36m  ╚══════════════════════════════════════════════════════╝\x1b[0m',
+    '\x1b[1;36m  ╔════════════════════════════════════════════════════════════╗\x1b[0m',
+    '\x1b[1;36m  ║   SelfConnect Terminal \x1b[0m\x1b[36mv3.0.0-rc.1\x1b[0m\x1b[1;36m — BROWSER PREVIEW       ║\x1b[0m',
+    '\x1b[1;36m  ╚════════════════════════════════════════════════════════════╝\x1b[0m',
     '',
-    '  \x1b[2mGoverned agent execution surface. This is a static preview:\x1b[0m',
-    '  \x1b[2mthe shell + widgets are simulated (no real PTY / providers).\x1b[0m',
+    '  \x1b[2mGoverned agent execution surface. This is a SIMULATED static\x1b[0m',
+    '  \x1b[2mpreview — the shell, widgets, and every command response are\x1b[0m',
+    '  \x1b[2mfaked client-side (no real PTY, daemon, or model providers).\x1b[0m',
     '',
-    '  Try shell: \x1b[33mls\x1b[0m, \x1b[33mgit status\x1b[0m, \x1b[33mnpm test\x1b[0m, \x1b[33mclear\x1b[0m',
-    '  Try \x1b[1;33mv2 slash commands\x1b[0m (never reach the shell):',
-    '    \x1b[33m/help\x1b[0m \x1b[33m/sessions\x1b[0m \x1b[33m/resume <id>\x1b[0m \x1b[33m/cost\x1b[0m \x1b[33m/verify\x1b[0m',
-    '    \x1b[33m/mcp list\x1b[0m \x1b[33m/a2a peers\x1b[0m \x1b[33m/tools\x1b[0m \x1b[33m/todo list\x1b[0m \x1b[33m/agent-mode plan\x1b[0m',
-    '  Click the \x1b[35mSC\x1b[0m mascot (bottom-right) to run a review.',
+    '  \x1b[1mShell:\x1b[0m \x1b[33mls\x1b[0m  \x1b[33mgit status\x1b[0m  \x1b[33mnpm test\x1b[0m  \x1b[33mclear\x1b[0m',
+    '',
+    '  \x1b[1;32mCore / governance:\x1b[0m',
+    '    \x1b[33m/help\x1b[0m \x1b[33m/sessions\x1b[0m \x1b[33m/resume <id>\x1b[0m \x1b[33m/review <mode>\x1b[0m \x1b[33m/verify\x1b[0m \x1b[33m/cost\x1b[0m',
+    '    \x1b[33m/agents\x1b[0m \x1b[33m/mcp list\x1b[0m \x1b[33m/a2a peers\x1b[0m \x1b[33m/tools\x1b[0m \x1b[33m/todo list\x1b[0m \x1b[33m/memory\x1b[0m',
+    '    \x1b[33m/redact-test <text>\x1b[0m \x1b[33m/local-only\x1b[0m \x1b[33m/approvals\x1b[0m \x1b[33m/agent-mode plan\x1b[0m \x1b[33m/rewind\x1b[0m',
+    '  \x1b[1;34mContext economy (v3a):\x1b[0m',
+    '    \x1b[33m/context\x1b[0m \x1b[33m/compact\x1b[0m \x1b[33m/pin <hash>\x1b[0m \x1b[33m/limits\x1b[0m \x1b[33m/knowledge\x1b[0m \x1b[33m/playbooks <sit>\x1b[0m',
+    '  \x1b[1;35mTrust layer (v3b):\x1b[0m',
+    '    \x1b[33m/delegate <agent>\x1b[0m \x1b[33m/grants\x1b[0m \x1b[33m/passport\x1b[0m \x1b[33m/replay\x1b[0m',
+    '  \x1b[1;33mProof layer (v3c):\x1b[0m',
+    '    \x1b[33m/lab\x1b[0m \x1b[33m/simulate <tool>\x1b[0m \x1b[33m/consult <q>\x1b[0m \x1b[33m/escalate\x1b[0m',
+    '',
+    '  \x1b[2mScroll the right dock for live widgets: Flight Recorder + Harness Lab.\x1b[0m',
+    '  \x1b[2mClick the \x1b[35mSC\x1b[0m\x1b[2m mascot (bottom-right) to run a review.\x1b[0m',
     '',
   ];
   writePty(lines.join('\r\n') + '\r\n');
@@ -534,9 +545,16 @@ const SLASH_HELP = [
   '  /help                 list all slash commands',
   '  /sessions             list resumable sessions',
   '  /resume <sessionId>   resume a past session',
-  '  /review <mode>        run the review agent',
+  '  /review <mode>        run the review agent (optimize|bugs|architecture|security|next-steps|full)',
   '  /verify               verify the audit ledger hash chain',
   '  /cost                 show cost + savings',
+  '  /memory [show|write]  show or append to session memory (SELFCONNECT.md)',
+  '  /redact-test <text>   preview secret redaction on a sample string',
+  '  /local-only [on|off]  toggle the hard cloud-egress block',
+  '  /approvals            list pending approval requests',
+  '  /approve <id>         approve a pending request',
+  '  /deny <id>            deny a pending request',
+  '  /rewind [path]        restore the last signed checkpoint',
   '  /agents               show the agent mesh',
   '  /mcp list             list MCP servers',
   '  /a2a peers            list A2A peers',
@@ -877,6 +895,112 @@ function mockSlash(line: string): SlashResult {
       emit('confidence.escalated', { tool: 'bash', confidence: 0.21, threshold: 0.5, highBlastRadius: true, reason: 'low confidence on high-blast-radius action — human approval required' });
       requestSimulatedApproval(demoPreview('bash', 'rm -rf build/'));
       return { ok: true, output: 'low-confidence bash escalated to human approval (see pending approval).' };
+    }
+    case 'review': {
+      const mode = (args[0] || 'full').toLowerCase() as ReviewMode;
+      const text = REVIEW_TEXT[mode] ?? REVIEW_TEXT.full;
+      const redactions = 2 + Math.floor(Math.random() * 3);
+      sim.redactionCount += redactions;
+      emit('review.start', { mode, provider: 'ollama' }, AGENT_REVIEW);
+      emit('redaction.applied', { count: redactions }, AGENT_REVIEW);
+      emit('route.decision', route(), AGENT_ROUTER);
+      emit('review.result', { mode, provider: 'ollama', costUsd: 0 }, AGENT_REVIEW);
+      return {
+        ok: true,
+        output: [
+          `review (${mode}) — ollama/gemma3, ${redactions} redaction(s), $0.00 (local):`,
+          '',
+          text,
+        ].join('\n'),
+      };
+    }
+    case 'local-only': {
+      const arg = (args[0] || '').toLowerCase();
+      if (arg === 'on') sim.localOnly = true;
+      else if (arg === 'off') sim.localOnly = false;
+      else sim.localOnly = !sim.localOnly;
+      emit('route.decision', route(), AGENT_ROUTER);
+      return {
+        ok: true,
+        output: sim.localOnly
+          ? 'LOCAL_ONLY is ON — all cloud egress is HARD-blocked regardless of keys.'
+          : 'LOCAL_ONLY is OFF — cloud routing permitted (still redacted + gated).',
+      };
+    }
+    case 'approvals': {
+      if (!sim.approvals.length) return { ok: true, output: 'no pending approvals.' };
+      return {
+        ok: true,
+        output: [
+          'Pending approvals:',
+          ...sim.approvals.map(
+            (a) => `  ${a.id}  ${a.kind}  ${a.summary}  est=$${a.estimatedCostUsd.toFixed(4)}`,
+          ),
+          '',
+          'approve with /approve <id> or deny with /deny <id> (or use the panel).',
+        ].join('\n'),
+      };
+    }
+    case 'approve':
+    case 'deny': {
+      const approve = name.toLowerCase() === 'approve';
+      const id = rest || sim.approvals[0]?.id;
+      const req = sim.approvals.find((a) => a.id === id);
+      if (!req) return { ok: false, output: `no pending approval${id ? ` with id ${id}` : ''}` };
+      req.status = approve ? 'approved' : 'denied';
+      sim.approvals = sim.approvals.filter((a) => a.id !== id);
+      const reviewAgent = sim.agents.find((a) => a.role === 'review');
+      if (reviewAgent) reviewAgent.state = 'idle';
+      emit('approval.resolved', req);
+      return { ok: true, output: `${approve ? 'approved' : 'denied'} ${req.id} (${req.summary})` };
+    }
+    case 'redact-test': {
+      const sample = rest || 'export ANTHROPIC_API_KEY=sk-ant-abc123 and AWS_SECRET=AKIAIOSFODNN7';
+      const redacted = sample
+        .replace(/sk-ant-[A-Za-z0-9]+/g, 'sk-ant-‹REDACTED›')
+        .replace(/AKIA[A-Z0-9]+/g, '‹REDACTED-AWS-KEY›')
+        .replace(/(api[_-]?key\s*[=:]\s*)\S+/gi, '$1‹REDACTED›');
+      const count = (sample.match(/sk-ant-[A-Za-z0-9]+|AKIA[A-Z0-9]+/g) || []).length;
+      sim.redactionCount += count;
+      emit('redaction.applied', { count });
+      return {
+        ok: true,
+        output: [
+          `redaction preview — ${count} secret(s) masked:`,
+          `  in : ${sample}`,
+          `  out: ${redacted}`,
+        ].join('\n'),
+      };
+    }
+    case 'memory': {
+      const sub = (args[0] || 'show').toLowerCase();
+      if (sub === 'write') {
+        const note = args.slice(1).join(' ') || 'noted a decision';
+        return { ok: true, output: `appended to SELFCONNECT.md: "${note}"` };
+      }
+      return {
+        ok: true,
+        output: [
+          'SELFCONNECT.md (session memory):',
+          '  ## Decisions',
+          '  - Daemon owns provider keys; renderer is untrusted.',
+          '  - Redact before any cloud egress; LOCAL_ONLY hard-blocks.',
+          '  ## Open questions',
+          '  - Wire BPC/TSK adapters to a real transport.',
+        ].join('\n'),
+      };
+    }
+    case 'rewind': {
+      const path = rest || './data/checkpoints/latest.scckpt';
+      emit('checkpoint.restored', { path, seq: sim.ledgerEntries });
+      return {
+        ok: true,
+        output: [
+          `restored last signed checkpoint: ${path}`,
+          `  ledger head re-verified at seq=${sim.ledgerEntries}  chain=INTACT`,
+          '  signature: VALID (ed25519)',
+        ].join('\n'),
+      };
     }
     case 'clear':
       return { ok: true, output: '', clear: true };
