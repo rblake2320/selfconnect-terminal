@@ -50,6 +50,55 @@ hash-chained ledger. Keys stay daemon-only; the renderer stays untrusted.
 
 ---
 
+## What's new in v3 — Context Economy
+
+v3 makes context a **governed, accounted resource**. The model is shown the
+smallest correct slice of context, every byte it was (or wasn't) shown is a
+ledger event, and the savings are priced against cloud baselines. As in v2,
+**everything new flows through the same identity-stamped bus → ledger**, and
+distillation runs on the **local** model at $0 (cloud distillation would require
+approval like any cloud call; redaction runs before any warm fact can leave).
+
+- **Content-addressed context store** — every artifact (file, scrollback, diff,
+  doc) is SHA‑256 hashed into an immutable blob under `./data/context-store/`.
+  The same bytes are never stored or paid for twice. A per-session
+  *seen-by-model* index (keyed `provider:hash`) means once the model has seen a
+  blob, later turns send a **stable ref + 3-line digest** instead of the full
+  bytes — dedup that holds **across turns and across mesh agents** (A2A handoffs
+  pass blob refs, not copies). Each store/dedup decision is audited
+  (`context.stored`, `context.dedup`).
+- **Tiered session memory (HOT / WARM / COLD)** — a HOT verbatim window of recent
+  turns; a WARM `SessionKnowledge` object (decisions, facts, file states, open
+  questions, todos, named entities) distilled from older turns by the **local**
+  model ($0, never leaves the machine; deterministic heuristic fallback when
+  Ollama is offline); and COLD = the ledger + blob store with event-id
+  provenance for on-demand rehydration. Knowledge is persisted in the session
+  snapshot, so **resume re-reads nothing** — it loads the distilled delta.
+- **Context Gauge as actuator** — pressure maps to `normal/warn/danger/migrate`
+  (60/80/90%). At **warn** it auto-compacts the oldest HOT context to WARM; at
+  **danger** it compacts aggressively; at **migrate** it spawns a **successor
+  run** (same `sessionId`, new `runId`, ledger-linked to its ancestor) seeded
+  **only** from WARM knowledge + pinned blobs — no silent quality cliff. Every
+  compaction/migration is a ledger event (`context.compacted`,
+  `context.migrated`).
+- **Cost Kernel v2 counters** — Tokens **NOT** resent (dedup), cache savings,
+  distillation savings, and **Context Efficiency %** (useful-new-tokens /
+  total-tokens). Shown live in the Cost Kernel widget.
+- **Pull-based + external memory** — `context_request` pulls exactly what's
+  needed from store/knowledge/ledger instead of dumping; a `scratchpad` holds
+  working memory that does **not** ride in the prompt; `introspect`/`metabolic`
+  let the agent feel its own history and remaining context/budget/time; a
+  machine-readable `limits.json` states what the harness/model **cannot** do.
+- **Cumulative cross-session memory** — **playbooks** crystallize a solved
+  procedure (versioned, content-addressed, provenance-stamped) and load back by
+  situation match; **failure memory** records anti-patterns
+  (`signature → what not to do → what worked instead`) and surfaces a one-line
+  warning when a similar situation recurs.
+- **New slash commands** — `/context`, `/pin <hash>`, `/unpin <hash>`,
+  `/compact`, `/knowledge`, `/playbooks <situation>`, `/limits`.
+
+---
+
 ## Architecture
 
 ```
