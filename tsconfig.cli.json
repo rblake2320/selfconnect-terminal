@@ -1,0 +1,30 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "forceConsistentCasingInFileNames": true,
+    "declaration": true,
+    "outDir": "dist",
+    "rootDir": "src",
+    "sourceMap": false,
+    "types": ["node"]
+  },
+  "include": [
+    "src/cli/**/*.ts",
+    "src/sdk/**/*.ts",
+    "src/mcp/**/*.ts",
+    "src/daemon/**/*.ts",
+    "src/agent/**/*.ts",
+    "src/shared/**/*.ts"
+  ],
+  "exclude": ["node_modules", "dist", "dist-electron", "release", "tests", "src/renderer"]
+}

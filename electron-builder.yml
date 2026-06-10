@@ -1,0 +1,37 @@
+appId: com.selfconnect.terminal
+productName: SelfConnect Terminal
+copyright: Copyright © 2026 SelfConnect
+
+directories:
+  output: release
+  buildResources: build
+
+# Ship the compiled main/preload, the built renderer, and runtime deps.
+files:
+  - dist-electron/**/*
+  - dist/**/*
+  - package.json
+
+# node-pty is a native module: keep it unpacked so its .node addon loads at runtime.
+asarUnpack:
+  - "**/node_modules/node-pty/**"
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+    - target: portable
+      arch:
+        - x64
+  artifactName: ${productName}-${version}-${arch}.${ext}
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+
+portable:
+  artifactName: ${productName}-${version}-portable.${ext}
