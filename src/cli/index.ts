@@ -47,6 +47,7 @@ function usage(): void {
       '  slash <line>            run a slash command, e.g. slash "/cost"',
       '  mcp serve               run as a read-only MCP server over stdio',
       '  ledger verify           verify hash chain AND every checkpoint signature',
+      '  ledger export [--ietf]  export the audit trail (native or IETF conformance)',
       '  passport export|verify  export or verify a signed work-history passport',
       '  evidence export [sid]   write a compliance evidence bundle (.zip)',
       '  replay export|verify    write or verify a signed .screplay session bundle',
@@ -143,13 +144,28 @@ export async function main(argv: string[]): Promise<number> {
     }
 
     case 'ledger': {
-      if (rest[0] !== 'verify') {
-        print('usage: selfconnect ledger verify');
-        return 1;
+      if (rest[0] === 'verify') {
+        const report = client.daemon.verifyLedgerFull();
+        print(JSON.stringify(report, null, 2));
+        return report.chainOk && report.checkpointsOk ? 0 : 1;
       }
-      const report = client.daemon.verifyLedgerFull();
-      print(JSON.stringify(report, null, 2));
-      return report.chainOk && report.checkpointsOk ? 0 : 1;
+      if (rest[0] === 'export') {
+        const flags = rest.slice(1).filter((a) => a.startsWith('--'));
+        const args = rest.slice(1).filter((a) => !a.startsWith('--'));
+        const conformance = flags.includes('--ietf') ? 'ietf' : 'native';
+        const trail = client.daemon.exportAuditTrail(args[0], conformance);
+        const out = args[1];
+        const json = JSON.stringify(trail, null, 2);
+        if (out) {
+          writeFileSync(out, json, 'utf8');
+          print(`wrote ${conformance} audit trail to ${out}`);
+        } else {
+          print(json);
+        }
+        return 0;
+      }
+      print('usage: selfconnect ledger verify | ledger export [--ietf] [sessionId] [out.json]');
+      return 1;
     }
 
     case 'passport': {

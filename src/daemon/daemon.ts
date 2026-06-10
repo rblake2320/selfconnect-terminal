@@ -53,6 +53,7 @@ import {
   type PassportArtifact,
 } from './passport';
 import { buildEvidenceBundle, bundleDigest } from './evidence';
+import { toIetfAuditTrail } from './ietf-audit';
 import { buildReplayBundle, verifyReplayBundle } from './replay';
 import type { ToolServices } from './tools/types';
 import type {
@@ -1098,6 +1099,18 @@ export class Daemon {
       brokenAt: chain.brokenAt,
       reason: cp.reason,
     };
+  }
+
+  /**
+   * Export the ledger as a draft-sharif-agent-audit-trail-00-style trail.
+   * Gated behind a conformance flag so the native shape stays authoritative
+   * for everything else (B audit/compliance).
+   */
+  exportAuditTrail(sessionId?: string, conformance: 'native' | 'ietf' = 'native'): unknown {
+    const sid = sessionId && sessionId.length ? sessionId : this.identity.sessionId;
+    const events = this.ledger.all().filter((e) => !e.sessionId || e.sessionId === sid);
+    if (conformance === 'ietf') return toIetfAuditTrail([...events]);
+    return events;
   }
 
   /** Record a per-agent metering delta + signed receipt path (B2.4). */
