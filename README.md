@@ -170,6 +170,63 @@ Action categories: `invoke` (tool/MCP), `communicate` (A2A), `decide`
 
 ---
 
+## What's new in v3c — Proof Layer
+
+v3c turns the ledger into an **evidence substrate** and makes the harness reason
+about its own **uncertainty before it acts**. Everything still flows through the
+single identity-stamped `record()` choke point → hash-chained ledger, delegation
+chains are still enforced on the new tools, and provider keys never leave the
+daemon. Four capabilities:
+
+- **Harness Lab (D6)** — the ledger doubles as an eval substrate. Run the *same*
+  task under different **arms** (a named harness config: scoped toolset, context
+  policy hot-window size / dedup on-off, model/provider choice, permission mode)
+  and score each arm **purely from its ledger slice**: turns, total tokens,
+  cache/dedup %, tool-error rate, approvals triggered, wall time, and a success
+  signal (the task file declares a `verify` command whose exit code = success).
+  Arms run sequentially in **isolated `runId`s within one session**, fully
+  audited. Output is a side-by-side comparison table (CLI + JSON) and the
+  renderer **LabPanel**.
+
+  ```
+  selfconnect lab run task.json --arms baseline,dedup        # compare two arms
+  selfconnect lab run task.json --json                       # machine-readable
+  selfconnect lab report <sessionId>                         # re-score a past run
+  ```
+
+  A task file is `{ name, prompt?, steps:[{tool,input}], verify?, arms:[…] }`.
+  Scoring is deterministic and works offline with stub/local providers.
+
+- **Dry-run / simulate (E5)** — every mutating tool accepts `simulate: true` and
+  returns **predicted effects without executing**: a line diff preview for
+  `write_file` / `edit_file` / `apply_patch`, the files touched, and a
+  command-risk classification + estimated cost for `bash` / cloud tools. The
+  simulate path returns *before* the plan-mode block and the approval gate, so it
+  never mutates anything. Approval requests **attach the preview**, so the human
+  approves **evidence, not a promise**. Slash: `/simulate <tool> …`.
+
+- **Uncertainty channel (E6)** — a tool invocation may carry a `confidence`
+  (0–1) + rationale. A pure router judges it against an env-configurable
+  threshold (`SELFCONNECT_CONFIDENCE_THRESHOLD`, default `0.5`) **and** the
+  action's blast radius (mutating or `risk >= high`): confident → **proceed**;
+  low-confidence + high-blast-radius → **escalate** to human approval;
+  low-confidence + low-blast-radius → **verify** (force a dry-run first).
+  Confidence is shown as a badge in the Event Feed and recorded in the ledger
+  (`confidence.reported` / `confidence.escalated`).
+
+- **Second opinion / consult (E7)** — `consult({question, context_refs, model,
+  budget})` asks a **different** provider/model to critique a proposed risky
+  action before execution. It is **redacted** on the way out *and* back in,
+  **budgeted** via the Cost Kernel (refused if the estimate exceeds the budget),
+  and **approval-gated like any cloud send** (free and ungated when the chosen
+  model is local). Audited as `consult.requested` / `consult.result` (the raw
+  critique never enters the ledger payload). Slash: `/consult <question>`.
+
+- **New slash commands** — `/lab [run|report]`, `/simulate <tool>`,
+  `/consult <question>`.
+
+---
+
 ## Architecture
 
 ```
@@ -391,6 +448,7 @@ It runs: `npm install` → copy `.env` → `electron-rebuild -f -w node-pty`
 | `SELFCONNECT_MCP_CONFIG` | `./mcp-servers.json` | MCP servers config (see `mcp-servers.json.example`). |
 | `SELFCONNECT_CHECKPOINTS_DIR` | `./data/checkpoints` | File checkpoints for `/rewind`. |
 | `SELFCONNECT_HOOKS_CONFIG` | `./hooks.json` | Pre/post tool-use hooks. |
+| `SELFCONNECT_CONFIDENCE_THRESHOLD` | `0.5` | E6: below this, low-confidence actions verify (dry-run) or escalate (approval). |
 | `SEARCH_API_URL` / `SEARCH_API_KEY` | — | `web_search` provider (cloud — blocked in local-only). |
 
 ---

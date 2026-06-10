@@ -1,6 +1,6 @@
 {
   "name": "selfconnect-terminal",
-  "version": "3.0.0-alpha.2",
+  "version": "3.0.0-rc.1",
   "description": "SelfConnect Terminal — a governed agent execution surface with a real PTY terminal, live widgets, daemon-owned model routing, cost kernel, approval gates, secret redaction, a hash-chained audit ledger, session persistence, slash commands, an MCP client/server, a headless CLI + typed SDK, a governed tool layer, and live A2A (BPC/TSK) transport.",
   "author": "SelfConnect",
   "license": "MIT",
