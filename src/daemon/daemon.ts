@@ -11,6 +11,13 @@ import {
   type ChainStatus,
   type A2aKind,
   type RiskFinding,
+  type DelegationScope,
+  type DelegationCert,
+  type DelegationVerdict,
+  type Passport,
+  type MerkleReveal,
+  type ReplayBundle,
+  type DataClass,
 } from '../shared/contracts';
 import { loadConfig, type DaemonConfig } from './config';
 import { EventBus } from './event-bus';
@@ -35,6 +42,18 @@ import { ProjectMemory } from './tools/memory';
 import { CheckpointStore } from './tools/checkpoint-store';
 import { HookEngine } from './tools/hooks';
 import { ToolRegistry } from './tools/registry';
+import { AgentKeystore } from './agent-keys';
+import { CheckpointStore as LedgerCheckpointStore } from './ledger-checkpoints';
+import { DelegationRegistry, HUMAN_ROOT } from './delegation';
+import {
+  buildPassport,
+  revealLeaf,
+  verifyPassport,
+  verifyReveal,
+  type PassportArtifact,
+} from './passport';
+import { buildEvidenceBundle } from './evidence';
+import { buildReplayBundle, verifyReplayBundle } from './replay';
 import type { ToolServices } from './tools/types';
 import type {
   SlashResult,
@@ -81,6 +100,12 @@ export class Daemon {
   checkpoints: CheckpointStore;
   readonly hooks: HookEngine;
   readonly tools: ToolRegistry;
+  // v3b: Trust layer
+  readonly keystore: AgentKeystore;
+  readonly ledgerCheckpoints: LedgerCheckpointStore;
+  readonly delegation: DelegationRegistry;
+  private rootGrant: DelegationCert | null = null;
+  private lastPassport: PassportArtifact | null = null;
   // v3: Context Economy + agent's own asks
   readonly contextStore: ContextStore;
   readonly knowledge = new SessionKnowledgeStore();
@@ -136,6 +161,12 @@ export class Daemon {
     this.failures = new FailureStore(cfg.failuresPath);
     this.scratchpad = new Scratchpad(cfg.scratchpadPath);
     this.limits = loadLimits(cfg.limitsPath);
+    // v3b: trust layer — daemon-only keystore, signed checkpoints, delegation.
+    this.keystore = new AgentKeystore(cfg.keysDir);
+    this.ledgerCheckpoints = new LedgerCheckpointStore(cfg.checkpointsLedgerPath);
+    this.delegation = new DelegationRegistry(cfg.delegationsPath);
+    // The A2A manager signs every outbound envelope with the system key.
+    this.a2a.setSigner((hash) => this.keystore.sign(this.identity.agent('system'), hash));
     this.tools = new ToolRegistry({
       checkpoints: this.checkpoints,
       hooks: this.hooks,
@@ -147,6 +178,7 @@ export class Daemon {
         this.ledger.append({ type, payload, identity });
       },
       requestApproval: (summary) => this.gateToolApproval(summary),
+      authorizeDelegation: (agent, action) => this.authorizeDelegation(agent, action),
     });
 
     // Register the core agents in the mesh.
@@ -162,6 +194,38 @@ export class Daemon {
 
     this.record('run.start', { startedAt: this.startedAt }, 'system');
     this.record('limits.loaded', { count: this.limits.cannot.length }, 'system');
+
+    // Mint the system identity key + a human-approved root delegation grant for
+    // this session. The root authorizes the system agent broadly; sub-agents
+    // receive narrower, intersected grants via /delegate. Approval of the root
+    // is the human's act of starting the session (ApprovalsPanel at startup).
+    this.keystore.ensure(this.identity.agent('system'));
+    this.establishRootGrant();
+  }
+
+  /**
+   * Create (once) the session's human→system root delegation grant. Signed by
+   * the system identity at the human's direction; parent === null and
+   * humanApproved === true mark it as the chain terminus the daemon trusts.
+   */
+  private establishRootGrant(): void {
+    if (this.rootGrant) return;
+    const systemAgent = this.identity.agent('system');
+    const scope: DelegationScope = {
+      tools: ['*'],
+      dataClasses: ['public', 'internal', 'secret', 'cui'],
+      expiresAt: 0,
+      spendBudgetUsd: 0,
+    };
+    this.rootGrant = this.delegation.issue({
+      issuer: HUMAN_ROOT,
+      grantee: systemAgent,
+      scope,
+      parent: null,
+      humanApproved: true,
+      sign: (msg) => this.keystore.sign(systemAgent, msg),
+    });
+    this.record('grant.root', { grantee: systemAgent, hash: this.rootGrant.hash }, 'system');
   }
 
   /**
@@ -838,7 +902,187 @@ export class Daemon {
       knowledge: this.knowledge.get(),
       metabolic: this.metabolic(),
       pinned: this.contextStore.pinnedList(),
+      metering: this.cost.meteringList(),
+      grants: this.delegation.all(),
+      checkpoints: this.ledgerCheckpoints.count(),
     };
+  }
+
+  // -- Trust layer (B2.1–B2.4, B) ------------------------------------------
+
+  /**
+   * Authorize an agent action against its delegation chain (B2.2). Agents
+   * without an explicit grant fall back to the system agent's root authority;
+   * any other agent must hold a chain terminating at the human root. A denial
+   * is recorded as `delegation.denied` and surfaces its reason as steering.
+   */
+  authorizeDelegation(
+    agent: string,
+    action: { tool?: string; spendUsd?: number; dataClass?: DataClass },
+  ): DelegationVerdict {
+    const systemAgent = this.identity.agent('system');
+    const agentId = agent === 'system' || agent === 'tool' || agent === 'shell' ? systemAgent : agent;
+    // The system agent rides the session root grant directly.
+    const grantee = this.delegation.latestFor(agentId) ? agentId : systemAgent;
+    const verdict = this.delegation.authorize(grantee, action);
+    if (!verdict.ok) {
+      this.record('delegation.denied', { agent: agentId, action, reason: verdict.reason }, 'system');
+    }
+    return verdict;
+  }
+
+  /**
+   * Issue a scoped sub-grant from an issuing agent to a grantee (/delegate).
+   * The issuer must already hold authority; the child scope is recorded as-is
+   * and intersected with its parents at verification time.
+   */
+  delegate(input: {
+    issuer?: string;
+    grantee: string;
+    tools?: string[];
+    spendBudgetUsd?: number;
+    expiresInMs?: number;
+    dataClasses?: DataClass[];
+  }): DelegationCert {
+    const systemAgent = this.identity.agent('system');
+    const issuerId = input.issuer ?? systemAgent;
+    this.keystore.ensure(issuerId);
+    const parent = this.delegation.latestFor(issuerId) ?? this.rootGrant;
+    const scope: DelegationScope = {
+      tools: input.tools && input.tools.length ? input.tools : ['*'],
+      dataClasses: input.dataClasses && input.dataClasses.length ? input.dataClasses : ['public'],
+      expiresAt: input.expiresInMs && input.expiresInMs > 0 ? Date.now() + input.expiresInMs : 0,
+      spendBudgetUsd: input.spendBudgetUsd ?? 0,
+    };
+    const cert = this.delegation.issue({
+      issuer: issuerId,
+      grantee: input.grantee,
+      scope,
+      parent: parent ? parent.hash : null,
+      humanApproved: false,
+      sign: (msg) => this.keystore.sign(issuerId, msg),
+    });
+    this.record('delegation.issued', { issuer: issuerId, grantee: input.grantee, hash: cert.hash, scope }, 'system');
+    return cert;
+  }
+
+  listGrants(): DelegationCert[] {
+    return this.delegation.all();
+  }
+
+  /** Verify a delegation chain by its head hash (for /grants detail + CLI). */
+  verifyGrant(hash: string): DelegationVerdict {
+    return this.delegation.verifyChain(hash);
+  }
+
+  /** Seal the current ledger head as a signed checkpoint (B). */
+  sealCheckpoint(): { seq: number; hash: string; entries: number } {
+    const status = this.ledger.status();
+    const entries = this.ledger.all();
+    const head = entries[entries.length - 1];
+    const seq = head ? head.seq : 0;
+    const hash = head ? head.hash : status.lastHash;
+    const cp = this.ledgerCheckpoints.seal(
+      { seq, hash, entries: status.entries },
+      (msg) => this.keystore.sign(this.identity.agent('system'), msg),
+    );
+    this.record('checkpoint.signed', { seq: cp.seq, hash: cp.hash, entries: cp.entries }, 'system');
+    return { seq: cp.seq, hash: cp.hash, entries: cp.entries };
+  }
+
+  /** Build + sign an exportable passport over this session's ledger (B2.3). */
+  exportPassport(sessionId?: string): Passport {
+    const sid = sessionId ?? this.identity.sessionId;
+    const events = this.ledger.all().filter((e) => !e.sessionId || e.sessionId === sid);
+    const agentId = this.identity.agent('system');
+    this.keystore.ensure(agentId);
+    const artifact = buildPassport(agentId, [...events], (msg) => this.keystore.sign(agentId, msg));
+    this.lastPassport = artifact;
+    this.record('passport.exported', { agentId, leafCount: artifact.passport.leafCount, root: artifact.passport.merkleRoot }, 'system');
+    return artifact.passport;
+  }
+
+  /** Verify a passport's signature (B2.3). */
+  verifyPassportSig(passport: Passport): { ok: boolean; reason: string } {
+    const v = verifyPassport(passport);
+    this.record('passport.verified', { agentId: passport.agentId, ok: v.ok }, 'system');
+    return { ok: v.ok, reason: v.reason };
+  }
+
+  /** Produce a selective reveal of one leaf from the last exported passport. */
+  revealPassportLeaf(index: number, content?: string): MerkleReveal | null {
+    if (!this.lastPassport) return null;
+    if (index < 0 || index >= this.lastPassport.leaves.length) return null;
+    return revealLeaf(this.lastPassport, index, content);
+  }
+
+  /** Verify a selective reveal against a passport root (B2.3). */
+  verifyPassportReveal(passport: Passport, reveal: MerkleReveal): boolean {
+    return verifyReveal(passport, reveal);
+  }
+
+  /** Build a signed session replay bundle (.screplay) (B flight recorder). */
+  exportReplay(sessionId?: string): ReplayBundle {
+    const sid = sessionId ?? this.identity.sessionId;
+    const events = this.ledger.all().filter((e) => !e.sessionId || e.sessionId === sid);
+    const seqs = new Set(events.map((e) => e.seq));
+    const checkpoints = this.ledgerCheckpoints.all().filter((c) => seqs.has(c.seq));
+    const agentId = this.identity.agent('system');
+    const bundle = buildReplayBundle({
+      sessionId: sid,
+      events: [...events],
+      checkpoints: [...checkpoints],
+      publicKeys: this.keystore.allPublicKeys(),
+      sign: (msg) => this.keystore.sign(agentId, msg),
+    });
+    this.record('replay.exported', { sessionId: sid, events: bundle.events.length }, 'system');
+    return bundle;
+  }
+
+  /** Verify a replay bundle end-to-end (B). */
+  verifyReplay(bundle: ReplayBundle): ReturnType<typeof verifyReplayBundle> {
+    return verifyReplayBundle(bundle);
+  }
+
+  /** Build a compliance evidence bundle for a session (B). */
+  exportEvidence(sessionId?: string): ReturnType<typeof buildEvidenceBundle> {
+    const sid = sessionId ?? this.identity.sessionId;
+    const events = this.ledger.all().filter((e) => !e.sessionId || e.sessionId === sid);
+    const seqs = new Set(events.map((e) => e.seq));
+    const checkpoints = this.ledgerCheckpoints.all().filter((c) => seqs.has(c.seq));
+    const chain = this.ledger.status();
+    const cpVerify = this.ledgerCheckpoints.verify(this.ledger.all());
+    const bundle = buildEvidenceBundle({
+      sessionId: sid,
+      events: [...events],
+      checkpoints: [...checkpoints],
+      publicKeys: this.keystore.allPublicKeys(),
+      chainOk: chain.ok,
+      checkpointsOk: cpVerify.ok,
+      brokenAt: chain.brokenAt,
+    });
+    this.record('evidence.exported', { sessionId: sid, entries: bundle.events.length }, 'system');
+    return bundle;
+  }
+
+  /** Full ledger verification: hash chain AND every checkpoint signature (B). */
+  verifyLedgerFull(): { chainOk: boolean; checkpointsOk: boolean; entries: number; checkpoints: number; brokenAt: number | null; reason?: string } {
+    const chain = this.ledger.status();
+    const cp = this.ledgerCheckpoints.verify(this.ledger.all());
+    return {
+      chainOk: chain.ok,
+      checkpointsOk: cp.ok,
+      entries: chain.entries,
+      checkpoints: cp.checkpoints,
+      brokenAt: chain.brokenAt,
+      reason: cp.reason,
+    };
+  }
+
+  /** Record a per-agent metering delta + signed receipt path (B2.4). */
+  meterAgent(agentId: string, delta: { toolCalls?: number; spendUsd?: number; inputTokens?: number; outputTokens?: number }): void {
+    const rec = this.cost.meter(agentId, delta);
+    this.record('metering.recorded', rec, 'system');
   }
 
   /** Identity helper for callers that need a stamp (CLI/SDK). */

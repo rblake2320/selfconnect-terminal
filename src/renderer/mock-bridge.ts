@@ -23,6 +23,8 @@ import type {
   SessionKnowledge,
   ContextBlobRef,
   MetabolicState,
+  MeteringRecord,
+  DelegationCert,
 } from '../shared/contracts';
 import type { SelfConnectApi } from './selfconnect.d';
 
@@ -104,6 +106,9 @@ interface SimState {
   totalInputTokens: number;
   knowledge: SessionKnowledge;
   pinned: ContextBlobRef[];
+  metering: MeteringRecord[];
+  grants: DelegationCert[];
+  checkpoints: number;
   startedAtMs: number;
 }
 
@@ -178,6 +183,33 @@ const sim: SimState = {
     updatedAt: Date.now(),
   },
   pinned: [],
+  metering: [
+    { agentId: AGENT_SHELL, toolCalls: 7, spendUsd: 0, inputTokens: 4200, outputTokens: 1800, updatedAt: Date.now() - 3_000 },
+    { agentId: AGENT_REVIEW, toolCalls: 2, spendUsd: 0, inputTokens: 900, outputTokens: 300, updatedAt: Date.now() - 8_000 },
+  ],
+  grants: [
+    {
+      hash: 'a'.repeat(64),
+      issuer: 'human',
+      grantee: 'agent_system_preview',
+      scope: { tools: ['*'], dataClasses: ['public', 'internal', 'secret', 'cui'], expiresAt: 0, spendBudgetUsd: 0 },
+      parent: null,
+      issuedAt: Date.now() - 90_000,
+      humanApproved: true,
+      signature: { signer: 'agent_system_preview', publicKeyHex: 'ab'.repeat(16), sigHex: 'cd'.repeat(32), alg: 'ed25519' },
+    },
+    {
+      hash: 'b'.repeat(64),
+      issuer: 'agent_system_preview',
+      grantee: AGENT_REVIEW,
+      scope: { tools: ['read_file', 'grep'], dataClasses: ['public'], expiresAt: Date.now() + 3_600_000, spendBudgetUsd: 0.05 },
+      parent: 'a'.repeat(64),
+      issuedAt: Date.now() - 60_000,
+      humanApproved: false,
+      signature: { signer: 'agent_system_preview', publicKeyHex: 'ab'.repeat(16), sigHex: 'ef'.repeat(32), alg: 'ed25519' },
+    },
+  ],
+  checkpoints: 3,
   startedAtMs: Date.now(),
 };
 
@@ -309,6 +341,9 @@ function snapshot(): UiState {
     knowledge: sim.knowledge,
     metabolic: metabolicSnapshot(),
     pinned: sim.pinned,
+    metering: sim.metering,
+    grants: sim.grants,
+    checkpoints: sim.checkpoints,
   };
 }
 

@@ -1,4 +1,5 @@
 import {
+  type DelegationVerdict,
   type Identity,
   type PermissionMode,
   type RiskSeverity,
@@ -23,6 +24,11 @@ export interface ToolRegistryDeps {
   audit: (type: 'tool.call' | 'tool.result' | 'tool.blocked' | 'checkpoint.created' | 'hook.fired', payload: unknown, identity: Identity) => void;
   /** Request human approval for a gated tool; resolves true if granted. */
   requestApproval: (summary: string) => Promise<boolean>;
+  /**
+   * Authorize a tool against the caller's delegation chain (B2.2). Optional so
+   * standalone registries (tests) keep working without a delegation registry.
+   */
+  authorizeDelegation?: (agent: string, action: { tool?: string }) => DelegationVerdict;
 }
 
 const RISK_ORDER: Record<RiskSeverity, number> = { low: 0, medium: 1, high: 2, critical: 3 };
@@ -93,6 +99,15 @@ export class ToolRegistry {
     // Permission mode: plan blocks all mutating tools.
     if (mode === 'plan' && tool.mutating) {
       return this.blocked(name, identity, `plan mode blocks mutating tool '${name}'`);
+    }
+
+    // Delegation gate (B2.2): the caller's authority chain must cover this tool
+    // and terminate at a human root grant. A failed chain is a hard refusal.
+    if (this.deps.authorizeDelegation) {
+      const verdict = this.deps.authorizeDelegation(agent, { tool: name });
+      if (!verdict.ok) {
+        return this.blocked(name, identity, `delegation refused: ${verdict.reason}`);
+      }
     }
 
     // Risk escalation: bash inspects the actual command.

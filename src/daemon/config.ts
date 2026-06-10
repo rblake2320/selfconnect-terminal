@@ -38,6 +38,10 @@ export interface DaemonConfig {
   failuresPath: string;
   limitsPath: string;
   hotTurnBudgetTokens: number;
+  // --- v3b: Trust layer ---
+  keysDir: string;
+  checkpointsLedgerPath: string;
+  delegationsPath: string;
 }
 
 function num(value: string | undefined, fallback: number): number {
@@ -87,6 +91,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): DaemonConfig {
     failuresPath: env.SELFCONNECT_FAILURES_PATH || './data/failures.jsonl',
     limitsPath: env.SELFCONNECT_LIMITS_PATH || './limits.json',
     hotTurnBudgetTokens: num(env.SELFCONNECT_HOT_TURN_BUDGET, 8000),
+    keysDir: env.SELFCONNECT_KEYS_DIR || './data/keys',
+    checkpointsLedgerPath: env.SELFCONNECT_CHECKPOINTS_LEDGER || './data/ledger-checkpoints.jsonl',
+    delegationsPath: env.SELFCONNECT_DELEGATIONS_PATH || './data/delegations.jsonl',
   };
 }
 
