@@ -57,6 +57,24 @@ export interface ToolServices {
   todoRead(): string;
   memoryRead(): string;
   memoryWrite(content: string): string;
+  // --- v3: Context Economy + agent's own asks ---
+  /** Pull exactly the context needed from store/knowledge/ledger (E3). */
+  contextRequest(query: string, source: 'store' | 'knowledge' | 'ledger'): string;
+  /** External working memory NOT carried in the prompt (E4). */
+  scratchpadWrite(key: string, value: string): string;
+  scratchpadRead(query: string): string;
+  /** Query the agent's own session history/costs (E8). */
+  introspect(): string;
+  /** Cheap readable resource state: context %, budget, elapsed (E9). */
+  metabolic(): string;
+  /** Machine-readable manifest of what this harness/model CANNOT do (E10). */
+  limits(): string;
+  /** Crystallize a reusable playbook from a solved procedure (E1). */
+  crystallizePlaybook(input: { situation: string; title: string; steps: string[]; pitfalls?: string[] }): string;
+  /** Load playbooks matching a situation (E1). */
+  loadPlaybooks(situation: string): string;
+  /** Record an anti-pattern (E2). */
+  recordFailure(input: { signature: string; whatNotToDo: string; whatWorkedInstead: string }): string;
 }
 
 export interface ToolInvocationResult {

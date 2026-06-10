@@ -36,7 +36,18 @@ import { CheckpointStore } from './tools/checkpoint-store';
 import { HookEngine } from './tools/hooks';
 import { ToolRegistry } from './tools/registry';
 import type { ToolServices } from './tools/types';
-import type { SlashResult } from '../shared/contracts';
+import type {
+  SlashResult,
+  ContextBlobRef,
+  LimitsManifest,
+  MetabolicState,
+  ContextBlobKind,
+} from '../shared/contracts';
+import { ContextStore } from './context-store';
+import { SessionKnowledgeStore } from './session-knowledge';
+import { PlaybookStore, FailureStore } from './knowledge-stores';
+import { Scratchpad } from './scratchpad';
+import { loadLimits } from './limits';
 
 /**
  * SelfConnect daemon (v2): the trusted core. Owns the event bus, ledger, policy,
@@ -70,12 +81,20 @@ export class Daemon {
   checkpoints: CheckpointStore;
   readonly hooks: HookEngine;
   readonly tools: ToolRegistry;
+  // v3: Context Economy + agent's own asks
+  readonly contextStore: ContextStore;
+  readonly knowledge = new SessionKnowledgeStore();
+  readonly playbooks: PlaybookStore;
+  readonly failures: FailureStore;
+  readonly scratchpad: Scratchpad;
+  readonly limits: LimitsManifest;
 
   private permissionMode: PermissionMode = 'auto';
   private startedAt = Date.now();
   private terminalLines: string[] = [];
   private terminalCwd: string;
   private terminalShell: string;
+  private ancestorRunId?: string;
 
   constructor(cfg: DaemonConfig = loadConfig(), cwd: string = process.cwd()) {
     this.cfg = cfg;
@@ -111,6 +130,12 @@ export class Daemon {
     this.memory = new ProjectMemory(cwd);
     this.checkpoints = new CheckpointStore(cfg.checkpointsDir, this.identity.sessionId);
     this.hooks = new HookEngine(cfg.hooksPath);
+    // v3 subsystems
+    this.contextStore = new ContextStore(cfg.contextStoreDir);
+    this.playbooks = new PlaybookStore(cfg.playbooksPath);
+    this.failures = new FailureStore(cfg.failuresPath);
+    this.scratchpad = new Scratchpad(cfg.scratchpadPath);
+    this.limits = loadLimits(cfg.limitsPath);
     this.tools = new ToolRegistry({
       checkpoints: this.checkpoints,
       hooks: this.hooks,
@@ -136,6 +161,7 @@ export class Daemon {
     });
 
     this.record('run.start', { startedAt: this.startedAt }, 'system');
+    this.record('limits.loaded', { count: this.limits.cannot.length }, 'system');
   }
 
   /**
@@ -204,6 +230,213 @@ export class Daemon {
     if (!restored) return null;
     this.record('checkpoint.restored', { id: restored.id, filePath: restored.filePath }, 'system');
     return { id: restored.id, filePath: restored.filePath };
+  }
+
+  // -- Context Economy (A1-A5) ---------------------------------------------
+
+  /**
+   * Ingest a context artifact through the content-addressed store and decide
+   * what to actually send the model: full bytes on first sight for a provider,
+   * or a stable ref + 3-line digest thereafter. Dedup hits are booked as tokens
+   * NOT resent (cache savings) and every decision is a ledger event — the
+   * cryptographic evidence chain of what the model was and wasn't shown.
+   */
+  ingestContext(
+    content: string,
+    kind: ContextBlobKind,
+    source: string,
+    provider = 'ollama',
+  ): { payload: string; ref: ContextBlobRef; alreadySeen: boolean } {
+    const evt = this.record('context.stored', { kind, source }, 'system');
+    const prep = this.contextStore.prepareForSend(content, kind, source, provider, [evt.id]);
+    this.contextGauge.add(prep.ref.tokens);
+    if (prep.alreadySeen) {
+      this.contextGauge.recordDedupHit();
+      this.cost.recordDedup(prep.tokensSaved);
+      this.cost.accountContext(0, prep.ref.tokens);
+      this.record(
+        'context.dedup',
+        { hash: prep.ref.hash, source, tokensSaved: prep.tokensSaved },
+        'system',
+      );
+    } else {
+      this.cost.accountContext(prep.ref.tokens, prep.ref.tokens);
+    }
+    return { payload: prep.payload, ref: prep.ref, alreadySeen: prep.alreadySeen };
+  }
+
+  /**
+   * Distill a turn into WARM SessionKnowledge using the LOCAL model ($0). The
+   * raw turn is stored COLD (content-addressed) with provenance so exact bytes
+   * can be rehydrated on demand. Cloud distillation is never used here.
+   */
+  async distillTurn(turn: string): Promise<void> {
+    const evt = this.record('context.stored', { kind: 'knowledge', source: 'turn' }, 'system');
+    const blob = this.contextStore.put(turn, 'other', 'turn', [evt.id]);
+    const local = this.registry.local();
+    const { distilledTokens, usedModel } = await this.knowledge.distill(turn, local, blob.hash);
+    this.cost.recordDistillation(distilledTokens);
+    this.record(
+      'context.distilled',
+      { blob: blob.hash, tokens: distilledTokens, engine: usedModel ? 'ollama' : 'heuristic' },
+      'system',
+    );
+  }
+
+  /**
+   * Run the actuator for the current pressure: compact (warn), aggressive dedup
+   * note (danger), or successor migration (migrate). Returns a short label of
+   * what fired. Each decision is audited.
+   */
+  async actuateContext(): Promise<string> {
+    const action = this.contextGauge.recommendedAction();
+    switch (action) {
+      case 'compact': {
+        const moved = this.contextGauge.compactHotToWarm(this.cfg.hotTurnBudgetTokens);
+        this.record('context.compacted', { warmTokensAdded: moved, trigger: 'warn' }, 'system');
+        return `compacted oldest hot turns to warm (+${moved} warm tokens)`;
+      }
+      case 'dedup': {
+        const moved = this.contextGauge.compactHotToWarm(this.cfg.hotTurnBudgetTokens * 2);
+        this.record('context.compacted', { warmTokensAdded: moved, trigger: 'danger' }, 'system');
+        return `aggressive dedup/compaction (+${moved} warm tokens)`;
+      }
+      case 'migrate':
+        return this.migrateSuccessor();
+      default:
+        return 'no action: context pressure normal';
+    }
+  }
+
+  /**
+   * Spawn a successor run (same sessionId, NEW runId) seeded ONLY with the WARM
+   * SessionKnowledge + pinned blobs — a clean continuation with full provenance,
+   * ledger-linked to its ancestor. No silent quality cliff.
+   */
+  migrateSuccessor(): string {
+    const ancestor = this.identity.newRun();
+    this.ancestorRunId = ancestor;
+    const pinned = this.contextStore.pinnedList();
+    const pinnedTokens = pinned.reduce((n, r) => n + r.tokens, 0);
+    // Reset hot context; reseed from knowledge digest + pinned blobs only.
+    this.contextGauge.reset();
+    const k = this.knowledge.get();
+    const seedTokens = estimateTokens(JSON.stringify(k));
+    this.contextGauge.addWarm(seedTokens);
+    this.contextGauge.setPinnedTokens(pinnedTokens);
+    this.record(
+      'context.migrated',
+      { ancestorRunId: ancestor, seededFrom: 'knowledge+pinned', pinned: pinned.length, seedTokens },
+      'system',
+    );
+    return `migrated to successor run (seeded from ${pinned.length} pinned blob(s) + knowledge, ${seedTokens} tokens)`;
+  }
+
+  pinBlob(hash: string): string {
+    const ref = this.contextStore.pin(hash);
+    if (!ref) return `no blob ${hash}`;
+    this.contextGauge.setPinnedTokens(this.contextStore.pinnedList().reduce((n, r) => n + r.tokens, 0));
+    this.record('context.pinned', { hash: ref.hash, source: ref.source }, 'system');
+    return `pinned ${ref.hash.slice(0, 12)} (${ref.source})`;
+  }
+
+  unpinBlob(hash: string): string {
+    const ref = this.contextStore.unpin(hash);
+    if (!ref) return `no blob ${hash}`;
+    this.contextGauge.setPinnedTokens(this.contextStore.pinnedList().reduce((n, r) => n + r.tokens, 0));
+    this.record('context.unpinned', { hash: ref.hash, source: ref.source }, 'system');
+    return `unpinned ${ref.hash.slice(0, 12)} (${ref.source})`;
+  }
+
+  /**
+   * Pull-based context (E3): query the store/knowledge/ledger for exactly what
+   * is needed instead of guessing a dump. Returns the matching bytes/summary.
+   */
+  contextRequest(query: string, source: 'store' | 'knowledge' | 'ledger' = 'store'): string {
+    this.record('context.requested', { source, query: query.slice(0, 40) }, 'system');
+    if (source === 'knowledge') return JSON.stringify(this.knowledge.get());
+    if (source === 'ledger') {
+      const matches = this.ledger
+        .all()
+        .filter((e) => e.type.includes(query) || (e.sessionId ?? '').includes(query))
+        .slice(-20)
+        .map((e) => `#${e.seq} ${e.type} ${e.hash.slice(0, 12)}`);
+      return matches.length ? matches.join('\n') : '(no ledger matches)';
+    }
+    // store: exact hash, then source substring
+    const byHash = this.contextStore.read(query);
+    if (byHash) return byHash;
+    const ref = this.contextStore.list().find((r) => r.source.includes(query));
+    if (ref) return this.contextStore.read(ref.hash) ?? ref.digest;
+    return '(no context matches)';
+  }
+
+  // -- Self-introspection (E8) + metabolic awareness (E9) ------------------
+
+  /** Query the agent's own history: what did I try, where did I loop, cost. */
+  introspect(): string {
+    this.record('introspect.query', {}, 'system');
+    const entries = this.ledger.all().filter((e) => e.sessionId === this.identity.sessionId);
+    const byType: Record<string, number> = {};
+    for (const e of entries) byType[e.type] = (byType[e.type] ?? 0) + 1;
+    const tools = entries.filter((e) => e.type === 'tool.call').length;
+    const blocked = entries.filter((e) => e.type === 'tool.blocked').length;
+    const cost = this.cost.snapshot();
+    return JSON.stringify({
+      sessionId: this.identity.sessionId,
+      events: entries.length,
+      toolCalls: tools,
+      blocked,
+      byType,
+      spendUsd: cost.sessionSpendUsd,
+      avoidedUsd: cost.avoidedSpendUsd,
+      contextEfficiencyPct: cost.contextEfficiencyPct,
+    });
+  }
+
+  /** Cheap readable resource state the model can feel (E9). */
+  metabolic(): MetabolicState {
+    const ctx = this.contextGauge.snapshot();
+    return {
+      contextRemainingPct: Math.max(0, 100 - ctx.pressure),
+      budgetRemainingUsd: Math.max(0, this.cfg.maxSpendPerCallUsd - this.cost.snapshot().sessionSpendUsd),
+      elapsedMs: Date.now() - this.startedAt,
+    };
+  }
+
+  // -- Skill crystallization (E1) + failure memory (E2) --------------------
+
+  crystallizePlaybook(input: {
+    situation: string;
+    title: string;
+    steps: string[];
+    pitfalls?: string[];
+  }): string {
+    const evt = this.record('playbook.crystallized', { title: input.title }, 'system');
+    const pb = this.playbooks.crystallize({ ...input, provenance: [evt.id] });
+    return `crystallized playbook "${pb.title}" v${pb.version} (${pb.hash.slice(0, 12)})`;
+  }
+
+  loadPlaybooks(situation: string): string {
+    const matches = this.playbooks.match(situation);
+    if (matches.length === 0) return '(no matching playbooks)';
+    this.record('playbook.loaded', { situation: situation.slice(0, 40), count: matches.length }, 'system');
+    return matches
+      .map((p) => `▸ ${p.title} (v${p.version})\n  ${p.steps.join('\n  ')}`)
+      .join('\n');
+  }
+
+  recordFailure(input: { signature: string; whatNotToDo: string; whatWorkedInstead: string }): string {
+    const evt = this.record('failure.recorded', { signature: input.signature.slice(0, 40) }, 'system');
+    const rec = this.failures.record({ ...input, provenance: [evt.id] });
+    return `recorded anti-pattern (${rec.hash.slice(0, 12)})`;
+  }
+
+  /** One-line warning if a similar situation has failed before (E2). */
+  failureWarning(situation: string): string | null {
+    const warning = this.failures.warn(situation);
+    if (warning) this.record('failure.matched', { situation: situation.slice(0, 40) }, 'system');
+    return warning;
   }
 
   // -- Review pipeline -----------------------------------------------------
@@ -333,7 +566,7 @@ export class Daemon {
   /** Build the persistable snapshot of current daemon state. */
   buildSessionSnapshot(): SessionSnapshot {
     return {
-      version: 2,
+      version: 3,
       sessionId: this.identity.sessionId,
       startedAt: this.startedAt,
       lastActiveAt: Date.now(),
@@ -345,6 +578,9 @@ export class Daemon {
       permissionMode: this.permissionMode,
       todos: this.todos.list(),
       scrollback: this.terminalLines.slice(-300),
+      knowledge: this.knowledge.get(),
+      blobs: this.contextStore.list(),
+      ancestorRunId: this.ancestorRunId,
     };
   }
 
@@ -370,15 +606,21 @@ export class Daemon {
     this.identity = new IdentityRegistry(sessionId);
     this.startedAt = snap.startedAt;
 
-    // Restore stateful subsystems from the snapshot.
+    // Restore stateful subsystems from the snapshot. Resume re-reads NOTHING:
+    // the WARM SessionKnowledge + content-addressed blob refs come straight off
+    // the snapshot; bytes stay on disk for on-demand rehydration only.
     this.cost.restore(snap.cost);
     this.contextGauge.restore(snap.context.usedTokens);
+    this.contextGauge.restoreBreakdown(snap.context);
     this.sentinel.restore(snap.sentinel);
     this.policy.setLocalOnly(snap.localOnly);
     this.permissionMode = snap.permissionMode;
     this.todos.restore(snap.todos);
     this.terminalLines = snap.scrollback.slice();
     this.checkpoints = new CheckpointStore(this.cfg.checkpointsDir, sessionId);
+    this.knowledge.restore(snap.knowledge);
+    this.contextStore.restore(snap.blobs ?? []);
+    this.ancestorRunId = snap.ancestorRunId;
 
     // Reconcile via ledger replay: count this session's prior events.
     const replayed = this.ledger.all().filter((e) => e.sessionId === sessionId).length;
@@ -396,6 +638,7 @@ export class Daemon {
 
   writeTodos(items: { content: string; status: TodoStatus }[]): void {
     this.todos.set(items);
+    this.knowledge.setTodos(this.todos.list().map((t) => `[${t.status}] ${t.content}`));
     this.record('todo.update', { todos: this.todos.list() }, 'system');
     this.persistSnapshot();
   }
@@ -535,6 +778,26 @@ export class Daemon {
         this.memory.write(content);
         return `wrote ${content.length} bytes to ${this.memory.path}`;
       },
+      // v3
+      contextRequest: (query, source) => this.contextRequest(query, source),
+      scratchpadWrite: (key, value) => {
+        const n = this.scratchpad.write(key, value);
+        this.record('scratchpad.write', { key, bytes: n }, 'system');
+        return `wrote ${n} bytes to scratchpad[${key}]`;
+      },
+      scratchpadRead: (query) => {
+        this.record('scratchpad.read', { query: query.slice(0, 40) }, 'system');
+        const direct = this.scratchpad.read(query);
+        if (direct !== null) return direct;
+        const keys = this.scratchpad.query(query);
+        return keys.length ? `keys: ${keys.join(', ')}` : '(scratchpad empty/no match)';
+      },
+      introspect: () => this.introspect(),
+      metabolic: () => JSON.stringify(this.metabolic()),
+      limits: () => JSON.stringify(this.limits),
+      crystallizePlaybook: (input) => this.crystallizePlaybook(input),
+      loadPlaybooks: (situation) => this.loadPlaybooks(situation),
+      recordFailure: (input) => this.recordFailure(input),
     };
   }
 
@@ -572,6 +835,9 @@ export class Daemon {
       todos: this.todos.list(),
       sessions: this.listSessions(),
       peers: this.a2a.peerList(),
+      knowledge: this.knowledge.get(),
+      metabolic: this.metabolic(),
+      pinned: this.contextStore.pinnedList(),
     };
   }
 

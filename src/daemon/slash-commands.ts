@@ -40,6 +40,13 @@ const COMMANDS: CommandSpec[] = [
   { name: 'memory', usage: '/memory [show|write <text>]', summary: 'project memory (SELFCONNECT.md)' },
   { name: 'rewind', usage: '/rewind [path]', summary: 'restore last checkpoint' },
   { name: 'agent-mode', usage: '/agent-mode [plan|ask|auto]', summary: 'set permission mode' },
+  { name: 'context', usage: '/context', summary: 'show context economy breakdown (hot/warm/pinned/dedup)' },
+  { name: 'pin', usage: '/pin <hash>', summary: 'pin a context blob (survives migration)' },
+  { name: 'unpin', usage: '/unpin <hash>', summary: 'unpin a context blob' },
+  { name: 'compact', usage: '/compact', summary: 'force context compaction (hot → warm)' },
+  { name: 'limits', usage: '/limits', summary: 'what this harness/model cannot do' },
+  { name: 'knowledge', usage: '/knowledge', summary: 'show distilled session knowledge (WARM tier)' },
+  { name: 'playbooks', usage: '/playbooks <situation>', summary: 'load matching playbooks' },
 ];
 
 function helpText(): string {
@@ -215,6 +222,59 @@ export async function dispatchSlash(daemon: Daemon, line: string): Promise<Slash
       }
       daemon.setPermissionMode(mode);
       return { ok: true, output: `permission mode set to ${mode}` };
+    }
+
+    case 'context': {
+      const c = daemon.snapshot().context;
+      const cost = daemon.snapshot().cost;
+      return {
+        ok: true,
+        output: [
+          `Context economy (${c.pressure.toFixed(1)}% / ${c.level}):`,
+          `  hot=${c.hotTokens}  warm=${c.warmTokens}  pinned=${c.pinnedTokens}  total=${c.usedTokens}/${c.maxTokens}`,
+          `  dedup hits=${c.dedupHits}  compactions=${c.compactions}`,
+          `  tokens NOT resent=${cost.tokensNotResent}  cache savings=$${cost.cacheSavingsUsd.toFixed(4)}  distill savings=$${cost.distillationSavingsUsd.toFixed(4)}`,
+          `  Context Efficiency=${cost.contextEfficiencyPct.toFixed(1)}%`,
+        ].join('\n'),
+      };
+    }
+
+    case 'pin': {
+      if (!rest) return { ok: false, output: 'usage: /pin <hash>' };
+      return { ok: true, output: daemon.pinBlob(rest) };
+    }
+
+    case 'unpin': {
+      if (!rest) return { ok: false, output: 'usage: /unpin <hash>' };
+      return { ok: true, output: daemon.unpinBlob(rest) };
+    }
+
+    case 'compact': {
+      const out = await daemon.actuateContext();
+      return { ok: true, output: out };
+    }
+
+    case 'limits': {
+      const l = daemon.limits;
+      const rows = l.cannot.map((c) => `  - ${c}`);
+      return { ok: true, output: ['This harness/model CANNOT:', ...rows].join('\n') };
+    }
+
+    case 'knowledge': {
+      const k = daemon.knowledge.get();
+      return {
+        ok: true,
+        output: [
+          'Session knowledge (WARM):',
+          `  decisions: ${k.decisions.length}  facts: ${k.facts.length}  files: ${Object.keys(k.fileStates).length}`,
+          `  open questions: ${k.openQuestions.length}  todos: ${k.todos.length}  entities: ${k.namedEntities.length}`,
+        ].join('\n'),
+      };
+    }
+
+    case 'playbooks': {
+      if (!rest) return { ok: false, output: 'usage: /playbooks <situation>' };
+      return { ok: true, output: daemon.loadPlaybooks(rest) };
     }
 
     default:
