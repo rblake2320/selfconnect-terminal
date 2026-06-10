@@ -43,6 +43,7 @@ function stubServices(cwd: string): ToolServices {
     grantsList: () => '[]',
     passportExport: () => '{}',
     evidenceExport: () => '{}',
+    consult: async (input) => `consulted: ${input.question}`,
   };
 }
 
