@@ -30,6 +30,15 @@ function stubServices(cwd: string): ToolServices {
     todoRead: () => '[]',
     memoryRead: () => 'memory',
     memoryWrite: () => 'wrote memory',
+    contextRequest: (query, source) => `ctx ${source}: ${query}`,
+    scratchpadWrite: (key, value) => `wrote ${key}=${value}`,
+    scratchpadRead: (query) => `scratch: ${query}`,
+    introspect: () => '{}',
+    metabolic: () => '{}',
+    limits: () => '{}',
+    crystallizePlaybook: () => 'crystallized',
+    loadPlaybooks: (situation) => `playbooks: ${situation}`,
+    recordFailure: () => 'recorded',
   };
 }
 

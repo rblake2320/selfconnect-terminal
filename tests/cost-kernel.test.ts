@@ -53,3 +53,48 @@ describe('cost kernel', () => {
     expect(k.snapshot().perCallCapUsd).toBe(0.25);
   });
 });
+
+describe('cost kernel v3 — Context Economy counters', () => {
+  it('books dedup savings at baseline cloud input pricing', () => {
+    const k = makeKernel();
+    k.recordDedup(1_000_000);
+    const s = k.snapshot();
+    expect(s.tokensNotResent).toBe(1_000_000);
+    expect(s.cacheSavingsUsd).toBeCloseTo(3, 5);
+  });
+
+  it('ignores non-positive dedup amounts', () => {
+    const k = makeKernel();
+    k.recordDedup(0);
+    k.recordDedup(-5);
+    expect(k.snapshot().tokensNotResent).toBe(0);
+  });
+
+  it('books distillation savings at baseline cloud input pricing', () => {
+    const k = makeKernel();
+    k.recordDistillation(2_000_000);
+    expect(k.snapshot().distillationSavingsUsd).toBeCloseTo(6, 5);
+  });
+
+  it('computes context efficiency as fresh/total %, 100 when nothing accounted', () => {
+    const k = makeKernel();
+    expect(k.contextEfficiencyPct()).toBe(100);
+    k.accountContext(250, 1000);
+    expect(k.contextEfficiencyPct()).toBeCloseTo(25, 5);
+    expect(k.snapshot().contextEfficiencyPct).toBeCloseTo(25, 5);
+  });
+
+  it('restores the v3 counters from a snapshot on resume', () => {
+    const k = makeKernel();
+    k.recordDedup(500_000);
+    k.recordDistillation(500_000);
+    k.accountContext(100, 200);
+    const snap = k.snapshot();
+    const k2 = makeKernel();
+    k2.restore(snap);
+    const restored = k2.snapshot();
+    expect(restored.tokensNotResent).toBe(snap.tokensNotResent);
+    expect(restored.cacheSavingsUsd).toBeCloseTo(snap.cacheSavingsUsd, 8);
+    expect(restored.distillationSavingsUsd).toBeCloseTo(snap.distillationSavingsUsd, 8);
+  });
+});

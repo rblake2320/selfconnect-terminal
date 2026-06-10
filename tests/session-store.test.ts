@@ -16,8 +16,22 @@ function snap(sessionId: string, over: Partial<SessionSnapshot> = {}): SessionSn
       avoidedSpendUsd: 0.5,
       perCallCapUsd: 0.25,
       last: null,
+      tokensNotResent: 0,
+      cacheSavingsUsd: 0,
+      distillationSavingsUsd: 0,
+      contextEfficiencyPct: 100,
     },
-    context: { usedTokens: 100, maxTokens: 1000, pressure: 10, level: 'normal' },
+    context: {
+      usedTokens: 100,
+      maxTokens: 1000,
+      pressure: 10,
+      level: 'normal',
+      hotTokens: 100,
+      warmTokens: 0,
+      pinnedTokens: 0,
+      dedupHits: 0,
+      compactions: 0,
+    },
     sentinel: {
       redactionCount: 0,
       riskCount: 0,
@@ -30,6 +44,7 @@ function snap(sessionId: string, over: Partial<SessionSnapshot> = {}): SessionSn
     permissionMode: 'auto',
     todos: [],
     scrollback: ['line one', 'line two'],
+    blobs: [],
     ...over,
   };
 }

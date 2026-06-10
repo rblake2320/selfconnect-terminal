@@ -78,6 +78,8 @@ describe('event schema identity enforcement', () => {
       todos: [],
       sessions: [],
       peers: [],
+      knowledge: {},
+      metabolic: { contextRemainingPct: 100, budgetRemainingUsd: 0.25, elapsedMs: 0 },
     };
     expect(UiStateSchema.safeParse(state).success).toBe(true);
   });
