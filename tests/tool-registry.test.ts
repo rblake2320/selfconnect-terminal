@@ -39,6 +39,10 @@ function stubServices(cwd: string): ToolServices {
     crystallizePlaybook: () => 'crystallized',
     loadPlaybooks: (situation) => `playbooks: ${situation}`,
     recordFailure: () => 'recorded',
+    delegateGrant: (input) => `granted ${input.grantee}`,
+    grantsList: () => '[]',
+    passportExport: () => '{}',
+    evidenceExport: () => '{}',
   };
 }
 

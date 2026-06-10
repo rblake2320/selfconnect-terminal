@@ -52,7 +52,7 @@ import {
   verifyReveal,
   type PassportArtifact,
 } from './passport';
-import { buildEvidenceBundle } from './evidence';
+import { buildEvidenceBundle, bundleDigest } from './evidence';
 import { buildReplayBundle, verifyReplayBundle } from './replay';
 import type { ToolServices } from './tools/types';
 import type {
@@ -862,6 +862,26 @@ export class Daemon {
       crystallizePlaybook: (input) => this.crystallizePlaybook(input),
       loadPlaybooks: (situation) => this.loadPlaybooks(situation),
       recordFailure: (input) => this.recordFailure(input),
+      // v3b: trust layer
+      delegateGrant: (input) => {
+        const cert = this.delegate({
+          grantee: input.grantee,
+          tools: input.tools,
+          spendBudgetUsd: input.spendBudgetUsd,
+          expiresInMs: input.expiresInMs,
+          dataClasses: input.dataClasses as DataClass[] | undefined,
+        });
+        return JSON.stringify({ hash: cert.hash, grantee: cert.grantee, scope: cert.scope });
+      },
+      grantsList: () => JSON.stringify(this.listGrants().map((g) => ({ hash: g.hash, issuer: g.issuer, grantee: g.grantee, scope: g.scope, verdict: this.verifyGrant(g.hash) }))),
+      passportExport: (sessionId) => {
+        this.sealCheckpoint();
+        return JSON.stringify(this.exportPassport(sessionId));
+      },
+      evidenceExport: (sessionId) => {
+        const bundle = this.exportEvidence(sessionId);
+        return JSON.stringify({ sessionId: bundle.sessionId, report: bundle.report, digest: bundleDigest(bundle) });
+      },
     };
   }
 

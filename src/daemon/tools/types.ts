@@ -75,6 +75,15 @@ export interface ToolServices {
   loadPlaybooks(situation: string): string;
   /** Record an anti-pattern (E2). */
   recordFailure(input: { signature: string; whatNotToDo: string; whatWorkedInstead: string }): string;
+  // --- v3b: Trust layer ---
+  /** Issue a scoped delegation grant to a grantee agent (B2.2). */
+  delegateGrant(input: { grantee: string; tools?: string[]; spendBudgetUsd?: number; expiresInMs?: number; dataClasses?: string[] }): string;
+  /** List delegation grants with chain status (B2.2). */
+  grantsList(): string;
+  /** Export a signed work-history passport for a session (B2.3). */
+  passportExport(sessionId?: string): string;
+  /** Export a compliance evidence bundle digest for a session (B). */
+  evidenceExport(sessionId?: string): string;
 }
 
 export interface ToolInvocationResult {
