@@ -41,11 +41,54 @@ export class CostKernel {
   private sessionSpendUsd = 0;
   private avoidedSpendUsd = 0;
   private last: CostEstimate | null = null;
+  // --- v3: Context Economy savings accounting ---
+  private tokensNotResent = 0;
+  private cacheSavingsUsd = 0;
+  private distillationSavingsUsd = 0;
+  private freshInputTokens = 0;
+  private totalInputTokens = 0;
 
   constructor(private opts: CostKernelOptions) {}
 
   get perCallCapUsd(): number {
     return this.opts.perCallCapUsd;
+  }
+
+  /**
+   * Record a dedup hit: `savedTokens` were NOT resent because the model had
+   * already seen the blob. Priced at the baseline cloud input rate (this is the
+   * money a cloud-only harness would have burned re-sending the same bytes).
+   */
+  recordDedup(savedTokens: number): void {
+    if (savedTokens <= 0) return;
+    this.tokensNotResent += savedTokens;
+    this.cacheSavingsUsd += (savedTokens / PER_MILLION) * this.opts.baseline.inputPerMillion;
+  }
+
+  /**
+   * Record a distillation that ran on the local model instead of cloud. The
+   * tokens it would have cost at baseline cloud input pricing are booked as
+   * distillation savings.
+   */
+  recordDistillation(distilledTokens: number): void {
+    if (distilledTokens <= 0) return;
+    this.distillationSavingsUsd += (distilledTokens / PER_MILLION) * this.opts.baseline.inputPerMillion;
+  }
+
+  /**
+   * Account a model call's input tokens for Context Efficiency: `freshTokens`
+   * are genuinely new (useful) tokens; the remainder of `totalTokens` is
+   * re-sent / boilerplate overhead.
+   */
+  accountContext(freshTokens: number, totalTokens: number): void {
+    this.freshInputTokens += Math.max(0, freshTokens);
+    this.totalInputTokens += Math.max(0, totalTokens);
+  }
+
+  /** useful-new-tokens / total-tokens, 0..100. 100 when nothing accounted yet. */
+  contextEfficiencyPct(): number {
+    if (this.totalInputTokens <= 0) return 100;
+    return Math.max(0, Math.min(100, (this.freshInputTokens / this.totalInputTokens) * 100));
   }
 
   /**
@@ -115,10 +158,13 @@ export class CostKernel {
   }
 
   /** Restore cumulative totals from a persisted snapshot (session resume). */
-  restore(snapshot: Pick<CostSnapshot, 'sessionSpendUsd' | 'avoidedSpendUsd' | 'last'>): void {
+  restore(snapshot: CostSnapshot): void {
     this.sessionSpendUsd = snapshot.sessionSpendUsd;
     this.avoidedSpendUsd = snapshot.avoidedSpendUsd;
     this.last = snapshot.last;
+    this.tokensNotResent = snapshot.tokensNotResent ?? 0;
+    this.cacheSavingsUsd = snapshot.cacheSavingsUsd ?? 0;
+    this.distillationSavingsUsd = snapshot.distillationSavingsUsd ?? 0;
   }
 
   snapshot(): CostSnapshot {
@@ -127,6 +173,10 @@ export class CostKernel {
       avoidedSpendUsd: this.avoidedSpendUsd,
       perCallCapUsd: this.opts.perCallCapUsd,
       last: this.last,
+      tokensNotResent: this.tokensNotResent,
+      cacheSavingsUsd: this.cacheSavingsUsd,
+      distillationSavingsUsd: this.distillationSavingsUsd,
+      contextEfficiencyPct: this.contextEfficiencyPct(),
     };
   }
 }

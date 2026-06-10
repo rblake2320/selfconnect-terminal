@@ -31,6 +31,13 @@ export interface DaemonConfig {
   hooksPath: string;
   searchApiUrl: string;
   searchApiKey: string;
+  // --- v3: Context Economy + agent's own asks ---
+  contextStoreDir: string;
+  scratchpadPath: string;
+  playbooksPath: string;
+  failuresPath: string;
+  limitsPath: string;
+  hotTurnBudgetTokens: number;
 }
 
 function num(value: string | undefined, fallback: number): number {
@@ -74,6 +81,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): DaemonConfig {
     hooksPath: env.SELFCONNECT_HOOKS_CONFIG || './hooks.json',
     searchApiUrl: env.SEARCH_API_URL || '',
     searchApiKey: env.SEARCH_API_KEY || '',
+    contextStoreDir: env.SELFCONNECT_CONTEXT_STORE_DIR || './data/context-store',
+    scratchpadPath: env.SELFCONNECT_SCRATCHPAD_PATH || './data/scratchpad.json',
+    playbooksPath: env.SELFCONNECT_PLAYBOOKS_PATH || './data/playbooks.jsonl',
+    failuresPath: env.SELFCONNECT_FAILURES_PATH || './data/failures.jsonl',
+    limitsPath: env.SELFCONNECT_LIMITS_PATH || './limits.json',
+    hotTurnBudgetTokens: num(env.SELFCONNECT_HOT_TURN_BUDGET, 8000),
   };
 }
 
