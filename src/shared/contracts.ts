@@ -356,6 +356,9 @@ export type PermissionModeSet = z.infer<typeof PermissionModeSetSchema>;
 export const ResumeSessionSchema = z.object({ sessionId: z.string().min(1) });
 export type ResumeSession = z.infer<typeof ResumeSessionSchema>;
 
+export const ReplayEventsSchema = z.object({ sessionId: z.string().optional() });
+export type ReplayEvents = z.infer<typeof ReplayEventsSchema>;
+
 /** Result of dispatching a slash command (returned over IPC to the renderer). */
 export const SlashResultSchema = z.object({
   output: z.string(),
@@ -391,6 +394,8 @@ export const IPC = {
   permissionModeSet: 'permission:set',
   sessionsList: 'sessions:list',
   sessionResume: 'session:resume',
+  // v3b renderer -> main (invoke)
+  replayEvents: 'replay:events',
   // main -> renderer (send)
   busEvent: 'bus:event',
   ptyData: 'pty:data',

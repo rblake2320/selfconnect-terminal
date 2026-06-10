@@ -3,6 +3,7 @@ import type { BusEvent, PermissionMode, UiState } from '../shared/contracts';
 import { TerminalView } from './TerminalView';
 import { ApprovalsPanel } from './ApprovalsPanel';
 import { ReviewMascot } from './widgets/ReviewMascot';
+import { ReplayPanel } from './widgets/ReplayPanel';
 import {
   CostKernelWidget,
   ContextGaugeWidget,
@@ -126,6 +127,7 @@ export function App(): React.JSX.Element {
               <PermissionModeWidget mode={state.permissionMode} onSet={onSetPermissionMode} />
               <TodoWidget todos={state.todos} />
               <SessionsWidget sessions={state.sessions} onResume={onResumeSession} />
+              <ReplayPanel />
             </>
           )}
         </aside>

@@ -13,6 +13,7 @@ import {
   SlashCommandSchema,
   PermissionModeSetSchema,
   ResumeSessionSchema,
+  ReplayEventsSchema,
 } from '../src/shared/contracts';
 
 // Provider keys live ONLY in the daemon process env (HARD RULE 1).
@@ -118,6 +119,11 @@ function registerIpc(): void {
   ipcMain.handle(IPC.sessionResume, async (_e, raw) => {
     const { sessionId } = ResumeSessionSchema.parse(raw);
     return daemon!.resumeSession(sessionId);
+  });
+
+  ipcMain.handle(IPC.replayEvents, async (_e, raw) => {
+    const { sessionId } = ReplayEventsSchema.parse(raw ?? {});
+    return daemon!.replayEvents(sessionId);
   });
 }
 

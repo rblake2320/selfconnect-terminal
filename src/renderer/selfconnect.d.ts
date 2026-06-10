@@ -7,6 +7,7 @@ import type {
   PermissionMode,
   SessionSummary,
   ResumeResult,
+  LedgerEntry,
 } from '../shared/contracts';
 
 /**
@@ -25,6 +26,7 @@ export interface SelfConnectApi {
   setPermissionMode(mode: PermissionMode): Promise<UiState>;
   listSessions(): Promise<SessionSummary[]>;
   resumeSession(sessionId: string): Promise<ResumeResult>;
+  replayEvents(sessionId?: string): Promise<LedgerEntry[]>;
   onPtyData(handler: (data: string) => void): () => void;
   onBusEvent(handler: (evt: BusEvent) => void): () => void;
 }

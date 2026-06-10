@@ -25,6 +25,7 @@ import type {
   MetabolicState,
   MeteringRecord,
   DelegationCert,
+  LedgerEntry,
 } from '../shared/contracts';
 import type { SelfConnectApi } from './selfconnect.d';
 
@@ -322,6 +323,46 @@ function ledgerStatus(): ChainStatus {
   };
 }
 
+/**
+ * A scripted, chain-linked timeline for the flight-recorder replay panel.
+ * Each entry mirrors the LedgerEntry contract; prevHash/hash form a fake but
+ * consistent chain so the panel can scrub a realistic session.
+ */
+function mockReplayEvents(): LedgerEntry[] {
+  const t0 = sim.startedAtMs;
+  const script: { type: EventType; agentId: string; payload: unknown }[] = [
+    { type: 'run.start', agentId: 'agent_system_preview', payload: { cwd: '~/workspace' } },
+    { type: 'grant.root', agentId: 'human', payload: { grantee: 'agent_system_preview', humanApproved: true } },
+    { type: 'terminal.input', agentId: AGENT_SHELL, payload: { line: 'npm test' } },
+    { type: 'tool.call', agentId: AGENT_SHELL, payload: { tool: 'bash', command: 'npm test' } },
+    { type: 'route.decision', agentId: AGENT_ROUTER, payload: { provider: 'ollama', tier: 'local' } },
+    { type: 'tool.result', agentId: AGENT_SHELL, payload: { ok: true, summary: '49 passed' } },
+    { type: 'risk.detected', agentId: AGENT_SHELL, payload: CRITICAL_FINDING },
+    { type: 'approval.requested', agentId: AGENT_SHELL, payload: { kind: 'cloud-send' } },
+    { type: 'approval.resolved', agentId: AGENT_SHELL, payload: { approved: false } },
+    { type: 'delegation.issued', agentId: 'agent_system_preview', payload: { grantee: AGENT_REVIEW, tools: ['read_file', 'grep'] } },
+    { type: 'checkpoint.signed', agentId: 'agent_system_preview', payload: { seq: 9, entries: 10 } },
+    { type: 'run.end', agentId: 'agent_system_preview', payload: { ok: true } },
+  ];
+  let prevHash = '0'.repeat(64);
+  return script.map((s, i) => {
+    const hash = fakeHash(i + 1);
+    const entry: LedgerEntry = {
+      seq: i,
+      ts: t0 + i * 1200,
+      type: s.type,
+      sessionId: SESSION_ID,
+      runId: rid(),
+      agentId: s.agentId,
+      payload: s.payload,
+      prevHash,
+      hash,
+    };
+    prevHash = hash;
+    return entry;
+  });
+}
+
 function snapshot(): UiState {
   return {
     identity: { sessionId: SESSION_ID, runId: rid(), agentId: 'agent_system_preview' },
@@ -498,6 +539,10 @@ const SLASH_HELP = [
   '  /knowledge            show distilled session knowledge (WARM tier)',
   '  /playbooks <sit>      load matching playbooks',
   '  /limits               what this harness/model cannot do',
+  '  /delegate <agent>     issue a scoped, signed delegation grant',
+  '  /grants               list delegation grants + chain status',
+  '  /passport             export a signed Merkle work-history passport',
+  '  /replay               flight-recorder timeline of this session',
   '  /clear                clear the terminal view',
 ].join('\n');
 
@@ -508,6 +553,7 @@ const MOCK_TOOLS = [
   'session_list', 'memory_read', 'memory_write', 'context_request',
   'scratchpad_write', 'scratchpad_read', 'introspect', 'metabolic', 'limits',
   'crystallize_playbook', 'load_playbooks', 'record_failure',
+  'delegate_grant', 'grants_list', 'passport_export', 'evidence_export',
 ];
 
 const MOCK_PLAYBOOKS: { situation: string; title: string; steps: string[] }[] = [
@@ -701,6 +747,56 @@ function mockSlash(line: string): SlashResult {
     }
     case 'limits':
       return { ok: true, output: ['This harness/model CANNOT:', ...LIMITS_CANNOT.map((l) => `  - ${l}`)].join('\n') };
+    case 'delegate': {
+      const grantee = args[0] || 'agent_worker';
+      emit('delegation.issued', { issuer: 'agent_system_preview', grantee, hash: fakeHash(sim.ledgerEntries) });
+      sim.grants.push({
+        hash: fakeHash(sim.ledgerEntries),
+        issuer: 'agent_system_preview',
+        grantee,
+        scope: { tools: ['read_file', 'grep'], dataClasses: ['public'], expiresAt: Date.now() + 3_600_000, spendBudgetUsd: 0.05 },
+        parent: 'a'.repeat(64),
+        issuedAt: Date.now(),
+        humanApproved: false,
+        signature: { signer: 'agent_system_preview', publicKeyHex: 'ab'.repeat(16), sigHex: 'ef'.repeat(32), alg: 'ed25519' },
+      });
+      return { ok: true, output: `delegated to ${grantee}: tools=[read_file,grep] budget=$0.05 ttl=1h\n  chain → human root: VERIFIED` };
+    }
+    case 'grants':
+      return {
+        ok: true,
+        output: [
+          'Delegation grants:',
+          ...sim.grants.map(
+            (g) => `  ${g.hash.slice(0, 12)}  ${g.issuer} → ${g.grantee}  tools=[${g.scope.tools.join(',')}]  ${g.parent === null ? '(human root)' : 'VERIFIED'}`,
+          ),
+        ].join('\n'),
+      };
+    case 'passport': {
+      emit('checkpoint.signed', { seq: sim.ledgerEntries, entries: sim.ledgerEntries + 1 });
+      emit('passport.exported', { agentId: 'agent_system_preview', leafCount: sim.ledgerEntries, root: fakeHash(sim.ledgerEntries) });
+      return {
+        ok: true,
+        output: [
+          'Agent passport (signed, Merkle-rooted):',
+          `  agent=agent_system_preview  events=${sim.ledgerEntries}  toolCalls=12  spend=$${sim.sessionSpendUsd.toFixed(4)}`,
+          `  riskFindings=1  approvals: 1 requested / 1 resolved`,
+          `  merkleRoot=${fakeHash(sim.ledgerEntries).slice(0, 24)}…`,
+          '  signature: VALID — third-party verifiable via `selfconnect passport verify`',
+        ].join('\n'),
+      };
+    }
+    case 'replay': {
+      emit('replay.exported', { sessionId: SESSION_ID, events: sim.ledgerEntries });
+      return {
+        ok: true,
+        output: [
+          `Flight recorder: ${sim.ledgerEntries} events in ${SESSION_ID}`,
+          '  open the Flight Recorder panel to scrub the timeline,',
+          '  or export a signed .screplay via `selfconnect replay export`.',
+        ].join('\n'),
+      };
+    }
     case 'clear':
       return { ok: true, output: '', clear: true };
     default:
@@ -981,6 +1077,9 @@ export function createMockBridge(): SelfConnectApi {
         : [];
       emit('session.resumed', { sessionId, replayed: sess?.eventCount ?? 0 });
       return { ok: !!sess, scrollback, reason: sess ? undefined : `no snapshot for ${sessionId}` };
+    },
+    async replayEvents(_sessionId?: string): Promise<LedgerEntry[]> {
+      return mockReplayEvents();
     },
     onPtyData(handler: (data: string) => void): () => void {
       ptyHandlers.add(handler);

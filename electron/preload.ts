@@ -10,6 +10,7 @@ import {
   type PermissionMode,
   type SessionSummary,
   type ResumeResult,
+  type LedgerEntry,
 } from '../src/shared/contracts';
 
 /**
@@ -50,6 +51,9 @@ const api: SelfConnectApi = {
   },
   resumeSession(sessionId: string): Promise<ResumeResult> {
     return ipcRenderer.invoke(IPC.sessionResume, { sessionId }) as Promise<ResumeResult>;
+  },
+  replayEvents(sessionId?: string): Promise<LedgerEntry[]> {
+    return ipcRenderer.invoke(IPC.replayEvents, { sessionId }) as Promise<LedgerEntry[]>;
   },
   onPtyData(handler: (data: string) => void): () => void {
     const listener = (_e: unknown, data: string) => handler(data);

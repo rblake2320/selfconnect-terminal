@@ -18,6 +18,7 @@ import {
   type MerkleReveal,
   type ReplayBundle,
   type DataClass,
+  type LedgerEntry,
 } from '../shared/contracts';
 import { loadConfig, type DaemonConfig } from './config';
 import { EventBus } from './event-bus';
@@ -1111,6 +1112,16 @@ export class Daemon {
     const events = this.ledger.all().filter((e) => !e.sessionId || e.sessionId === sid);
     if (conformance === 'ietf') return toIetfAuditTrail([...events]);
     return events;
+  }
+
+  /**
+   * Read-only ledger slice for the flight-recorder replay panel. The renderer
+   * stays untrusted: this returns already-redaction-gated ledger entries only,
+   * no keys, in chain order (B flight recorder).
+   */
+  replayEvents(sessionId?: string): LedgerEntry[] {
+    const sid = sessionId && sessionId.length ? sessionId : this.identity.sessionId;
+    return this.ledger.all().filter((e) => !e.sessionId || e.sessionId === sid);
   }
 
   /** Record a per-agent metering delta + signed receipt path (B2.4). */

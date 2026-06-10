@@ -7,6 +7,7 @@ import type {
   PermissionMode,
   SessionSummary,
   ResumeResult,
+  LedgerEntry,
 } from '../src/shared/contracts';
 
 /**
@@ -38,6 +39,8 @@ export interface SelfConnectApi {
   listSessions(): Promise<SessionSummary[]>;
   /** v2: resume a past session; returns restored scrollback. */
   resumeSession(sessionId: string): Promise<ResumeResult>;
+  /** v3b: read-only ledger slice for the flight-recorder replay panel. */
+  replayEvents(sessionId?: string): Promise<LedgerEntry[]>;
   /** Subscribe to raw PTY byte stream. Returns an unsubscribe fn. */
   onPtyData(handler: (data: string) => void): () => void;
   /** Subscribe to identity-stamped bus events. Returns an unsubscribe fn. */

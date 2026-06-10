@@ -377,6 +377,69 @@ body {
   min-width: 140px;
 }
 
+/* --- v3b: flight recorder replay panel ---------------------------------- */
+.replay-card .card-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.replay-actions {
+  display: flex;
+  gap: 4px;
+}
+.replay-scrub {
+  width: 100%;
+  margin: 8px 0 4px;
+}
+.replay-meta {
+  font-size: 11px;
+}
+.replay-ticks {
+  display: flex;
+  gap: 2px;
+  margin: 6px 0;
+  height: 14px;
+  align-items: stretch;
+}
+.replay-tick {
+  flex: 1 1 auto;
+  min-width: 3px;
+  border: none;
+  border-radius: 2px;
+  opacity: 0.45;
+  cursor: pointer;
+  padding: 0;
+}
+.replay-tick.active {
+  opacity: 1;
+  outline: 1px solid var(--text, #fff);
+}
+.replay-detail {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-2);
+  padding: 6px;
+  margin-top: 4px;
+}
+.replay-detail-head {
+  display: flex;
+  gap: 10px;
+  font-size: 11px;
+  flex-wrap: wrap;
+}
+.replay-payload {
+  max-height: 120px;
+  overflow: auto;
+  font-size: 11px;
+  margin: 6px 0 4px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.replay-hash {
+  font-size: 10px;
+}
+
 /* --- v2 widgets ---------------------------------------------------------- */
 .card-subtitle {
   margin: 8px 0 4px;
