@@ -48,7 +48,7 @@ function usage(): void {
       '  mcp serve               run as a read-only MCP server over stdio',
       '  ledger verify           verify hash chain AND every checkpoint signature',
       '  ledger export [--ietf]  export the audit trail (native or IETF conformance)',
-      '  passport export|verify  export or verify a signed work-history passport',
+      '  passport export [file] | passport verify <file>  export or verify a signed work-history passport',
       '  evidence export [sid]   write a compliance evidence bundle (.zip)',
       '  replay export|verify    write or verify a signed .screplay session bundle',
       '  lab run <task> --arms <a,b>   evaluate a task under harness arms',
@@ -184,12 +184,26 @@ export async function main(argv: string[]): Promise<number> {
       if (sub === 'verify') {
         const file = rest[1];
         if (!file) {
-          print('usage: selfconnect passport verify <file>');
+          print('usage: selfconnect passport verify <path-to-passport.json>');
           return 1;
         }
-        const parsed = PassportSchema.safeParse(JSON.parse(readFileSync(file, 'utf8')));
+        let raw: string;
+        try {
+          raw = readFileSync(file, 'utf8');
+        } catch (err) {
+          print(`passport: cannot read file '${file}' — ${err instanceof Error ? err.message : String(err)}`);
+          return 1;
+        }
+        let json: unknown;
+        try {
+          json = JSON.parse(raw);
+        } catch (err) {
+          print(`passport: '${file}' is not valid JSON — ${err instanceof Error ? err.message : String(err)}`);
+          return 1;
+        }
+        const parsed = PassportSchema.safeParse(json);
         if (!parsed.success) {
-          print('passport: invalid file format');
+          print(`passport: '${file}' is not a valid passport`);
           return 1;
         }
         const v = verifyPassport(parsed.data);
@@ -197,7 +211,7 @@ export async function main(argv: string[]): Promise<number> {
         void verifyReveal; // available for reveal verification
         return v.ok ? 0 : 1;
       }
-      print('usage: selfconnect passport export|verify [file]');
+      print('usage: selfconnect passport export [file] | passport verify <path-to-passport.json>');
       return 1;
     }
 

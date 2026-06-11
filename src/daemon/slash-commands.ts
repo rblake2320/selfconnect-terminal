@@ -69,12 +69,33 @@ function unknown(name: string): SlashResult {
   };
 }
 
-/** Split a slash line into the command name and the remaining argument string. */
+/**
+ * Split a slash line into the command name and the remaining argument string.
+ *
+ * Only the leading command token is lowercased — that is the part matched
+ * case-insensitively against the command table / subcommand names. The argument
+ * remainder is returned with its ORIGINAL case intact so that case-sensitive
+ * payloads (JSON values, tool names, file paths, base64, hashes) are never
+ * corrupted. Splitting on the first whitespace run keeps the remainder whole, so
+ * JSON containing spaces is preserved verbatim.
+ */
 function parse(line: string): { name: string; rest: string } {
   const trimmed = line.trim().replace(/^\//, '');
-  const space = trimmed.indexOf(' ');
-  if (space < 0) return { name: trimmed.toLowerCase(), rest: '' };
-  return { name: trimmed.slice(0, space).toLowerCase(), rest: trimmed.slice(space + 1).trim() };
+  const match = trimmed.match(/^(\S+)\s+([\s\S]*)$/);
+  if (!match) return { name: trimmed.toLowerCase(), rest: '' };
+  return { name: match[1].toLowerCase(), rest: match[2].trim() };
+}
+
+/**
+ * Like {@link parse} but the leading token's case is PRESERVED. Used where the
+ * first token is itself a case-sensitive argument (e.g. a tool name) rather than
+ * a command keyword to be matched case-insensitively.
+ */
+function splitFirst(rest: string): { head: string; tail: string } {
+  const trimmed = rest.trim();
+  const match = trimmed.match(/^(\S+)\s+([\s\S]*)$/);
+  if (!match) return { head: trimmed, tail: '' };
+  return { head: match[1], tail: match[2].trim() };
 }
 
 /**
@@ -340,16 +361,23 @@ async function lab(daemon: Daemon, rest: string): Promise<SlashResult> {
   return { ok: false, output: 'usage: /lab run <task-file> [arms=a,b] | /lab report <sessionId>' };
 }
 
-/** E5: dry-run a single tool. Usage: /simulate <tool> <json-input>. */
+/**
+ * E5: dry-run a single tool. Usage: /simulate <tool> <json-input>.
+ *
+ * The first token is the tool name (case preserved — tool names are matched
+ * exactly). Everything after it is treated as a single raw JSON string: it is
+ * NOT split on spaces, so payloads like {"path": "A B", "v": "MixedCase"} parse
+ * intact with their original case.
+ */
 async function simulate(daemon: Daemon, rest: string): Promise<SlashResult> {
-  const { name: tool, rest: args } = parse(rest);
+  const { head: tool, tail: args } = splitFirst(rest);
   if (!tool) return { ok: false, output: 'usage: /simulate <tool> <json-input>' };
   let input: unknown = {};
   if (args) {
     try {
       input = JSON.parse(args);
     } catch {
-      return { ok: false, output: 'simulate: input must be valid JSON' };
+      return { ok: false, output: 'usage: /simulate <tool> <json-input> — <json-input> must be valid JSON' };
     }
   }
   const result = await daemon.tools.invoke(tool, input, 'tool', undefined, { simulate: true });
