@@ -1,6 +1,7 @@
 import type { Daemon } from './daemon';
 import type { PermissionMode, ReviewMode, SlashResult } from '../shared/contracts';
 import { LabTaskSchema } from '../shared/contracts';
+import { meshProtocolText } from './mesh-coordination';
 
 const REVIEW_MODES: ReviewMode[] = ['optimize', 'bugs', 'architecture', 'security', 'next-steps', 'full'];
 
@@ -34,6 +35,7 @@ const COMMANDS: CommandSpec[] = [
   { name: 'agents', usage: '/agents', summary: 'show the agent mesh' },
   { name: 'mcp', usage: '/mcp [list|tools <server>|call <server> <tool> <json>]', summary: 'MCP client' },
   { name: 'a2a', usage: '/a2a [peers|send <peer> <msg>|poll]', summary: 'agent-to-agent transport' },
+  { name: 'mesh-protocol', usage: '/mesh-protocol', summary: 'show token-disciplined mesh reply rules' },
   { name: 'redact-test', usage: '/redact-test <text>', summary: 'preview redaction' },
   { name: 'clear', usage: '/clear', summary: 'clear the terminal view' },
   { name: 'tools', usage: '/tools', summary: 'list governed tools' },
@@ -202,6 +204,9 @@ export async function dispatchSlash(daemon: Daemon, line: string): Promise<Slash
 
     case 'a2a':
       return a2a(daemon, rest);
+
+    case 'mesh-protocol':
+      return { ok: true, output: meshProtocolText() };
 
     case 'redact-test': {
       if (!rest) return { ok: false, output: 'usage: /redact-test <text>' };

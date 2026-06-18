@@ -227,6 +227,23 @@ daemon. Four capabilities:
 
 ---
 
+## Post-v3c Win32 mesh update
+
+The latest SelfConnect core work adds a hard coordination rule for multi-agent
+terminal meshes: replies must travel through SelfConnect transport into the
+receiving agent's registered terminal, not by local narration that another
+agent has to scrape. Use:
+
+```bash
+selfconnect slash "/mesh-protocol"
+```
+
+See [Win32 Mesh Updates](docs/WIN32-MESH-UPDATES.md) for the terminal-specific
+integration backlog: target guard, `birth_id`, echo-filtered readback, channel
+router, and compact handoff.
+
+---
+
 ## Architecture
 
 ```

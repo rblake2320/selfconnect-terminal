@@ -15,6 +15,7 @@
  *   selfconnect review <mode>         run the review agent
  *   selfconnect tools                 list governed tools
  *   selfconnect slash "/cost"        run a slash command
+ *   selfconnect slash "/mesh-protocol" show agent-to-agent transport rules
  *   selfconnect mcp serve             run as a read-only MCP server (stdio)
  *   selfconnect ledger verify         verify hash chain AND checkpoint signatures
  *   selfconnect passport export|verify [file]
