@@ -94,6 +94,17 @@ result: local -> Codex send PASS, Codex -> local reply PASS, local -> Codex repl
 transport: guarded SelfConnect Win32 send, no hidden headless-only step
 ```
 
+For Codex/Claude-style terminal UIs, the visible chat harness uses a two-step
+send path:
+
+```text
+guarded type -> submit_claude_input(hwnd) dual WM_CHAR Enter -> require True
+```
+
+Do not treat `chars_sent` as proof that the agent received the message. It may
+only mean the text landed in the input box. The harness now fails loud unless
+the submit primitive returns `True`.
+
 Observed limits:
 
 - without Ollama JSON mode, Hermes returned malformed JSON three times;

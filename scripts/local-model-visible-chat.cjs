@@ -25,6 +25,7 @@ const ollamaUrl = arg('--ollama-url', process.env.OLLAMA_URL || 'http://127.0.0.
 const codexHwnd = arg('--codex-hwnd', '');
 const codexTitle = arg('--codex-title', 'codex 1');
 const codexClass = arg('--codex-class', 'CASCADIA_HOSTING_WINDOW_CLASS');
+const submitMode = arg('--submit-mode', 'dual-wmchar');
 const nonce = arg('--nonce', `SC_LOCAL_CHAT_${crypto.randomBytes(4).toString('hex').toUpperCase()}`);
 const title = `LOCAL-OLLAMA-CHAT-${nonce.slice(-8)}`;
 
@@ -79,10 +80,17 @@ function validateMessage(raw, requireNonce) {
   return message;
 }
 
+function compactPacket(message) {
+  const oneLine = message.replace(/\s+/g, ' ').trim();
+  return oneLine.length <= 180 ? oneLine : `${oneLine.slice(0, 155)}... NONCE=${nonce}`;
+}
+
 async function askLocalModel(kind, input = '') {
   const prompt = [
     'You are LOCAL-OLLAMA-1 inside a visible SelfConnect terminal test.',
     'Return only one compact JSON object. No markdown. No newline characters inside string values.',
+    'Your message must be one physical line, 240 characters or fewer.',
+    'If asked about repair, say exactly: inspect file -> JSON action -> validate -> patch sandbox -> run tests -> write outbox.',
     'Schema: {"message":"<one short line>"}',
     `NONCE=${nonce}`,
     kind === 'initial'
@@ -104,11 +112,23 @@ async function askLocalModel(kind, input = '') {
   throw new Error('local model did not produce a valid chat message after retries');
 }
 
+function runSelfConnect(argsForPython, label) {
+  const result = childProcess.spawnSync('python', argsForPython, {
+    cwd: 'C:\\Users\\techai\\PKA testing\\selfconnect',
+    encoding: 'utf8',
+    env: { ...process.env, PYTHONUTF8: '1' },
+  });
+  print(`[${now()}] ${label}_exit=${result.status}`);
+  if (result.stdout.trim()) print(`[${now()}] ${label}_stdout=${result.stdout.trim()}`);
+  if (result.stderr.trim()) print(`[${now()}] ${label}_stderr=${result.stderr.trim()}`);
+  if (result.status !== 0) throw new Error(`${label} failed`);
+  return result.stdout;
+}
+
 function sendToCodex(message) {
   if (!codexHwnd) throw new Error('missing --codex-hwnd');
-  const full = `[LOCAL-OLLAMA-1 -> CODEX-1] ${message}`;
-  const result = childProcess.spawnSync(
-    'python',
+  const full = `[LOCAL-OLLAMA-1 -> CODEX-1] ${compactPacket(message)}`;
+  runSelfConnect(
     [
       '-m',
       'sc_cli',
@@ -117,7 +137,6 @@ function sendToCodex(message) {
       codexHwnd,
       '--text',
       full,
-      '--submit',
       '--allow-input',
       '--expect-class',
       codexClass,
@@ -126,16 +145,40 @@ function sendToCodex(message) {
       '--char-delay',
       '0.002',
     ],
-    {
-      cwd: 'C:\\Users\\techai\\PKA testing\\selfconnect',
-      encoding: 'utf8',
-      env: { ...process.env, PYTHONUTF8: '1' },
-    },
+    'send_type',
   );
-  print(`[${now()}] send_exit=${result.status}`);
-  if (result.stdout.trim()) print(`[${now()}] send_stdout=${result.stdout.trim()}`);
-  if (result.stderr.trim()) print(`[${now()}] send_stderr=${result.stderr.trim()}`);
-  if (result.status !== 0) throw new Error('SelfConnect send failed');
+  if (submitMode === 'dual-wmchar') {
+    const submitOut = runSelfConnect(
+      [
+        '-c',
+        `from self_connect import submit_claude_input; print(submit_claude_input(${Number(codexHwnd)}))`,
+      ],
+      'submit_dual_wmchar',
+    );
+    if (!/\bTrue\b/.test(submitOut)) {
+      throw new Error('submit_dual_wmchar did not confirm True; packet may be only typed, not sent');
+    }
+  } else {
+    runSelfConnect(
+      [
+        '-m',
+        'sc_cli',
+        'send',
+        '--hwnd',
+        codexHwnd,
+        '--text',
+        '',
+        '--submit',
+        '--allow-input',
+        '--expect-class',
+        codexClass,
+        '--expect-title',
+        codexTitle,
+      ],
+      'submit_sc_cli',
+    );
+  }
+  print(`[${now()}] submitted_packet_chars=${full.length}`);
 }
 
 async function main() {
@@ -145,6 +188,7 @@ async function main() {
   print(`model: ${model}`);
   print(`nonce: ${nonce}`);
   print(`target: hwnd=${codexHwnd} title_contains=${codexTitle}`);
+  print(`submit_mode: ${submitMode}`);
   print('This window stays open. Send a reply into this terminal to continue the chat.');
   print('==============================================================================');
 
