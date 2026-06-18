@@ -35,6 +35,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "baseline:local": "node scripts/local-model-baseline.cjs",
+    "chat:local": "node scripts/local-model-visible-chat.cjs",
     "rebuild": "electron-rebuild -f -w node-pty",
     "dist": "npm run build && electron-builder --config electron-builder.yml"
   },

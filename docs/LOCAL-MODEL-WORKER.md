@@ -75,6 +75,38 @@ Hermes needed one retry on the addition task because the first response used an
 unsafe file path. The wrapper rejected it, fed the validation error back into the
 local model, accepted the corrected plan, and the test went green.
 
+## Visible Chat Baseline
+
+Run a local model in a real visible terminal and have it talk to a guarded Codex
+terminal:
+
+```text
+npm run chat:local -- --model hermes3:3b --codex-hwnd <hwnd> --codex-title "codex 1"
+```
+
+On 2026-06-18 this machine produced a visible two-way run:
+
+```text
+local window: LOCAL-OLLAMA-CHAT-C4D7091D
+model: hermes3:3b
+target: codex 1
+result: local -> Codex send PASS, Codex -> local reply PASS, local -> Codex reply PASS
+transport: guarded SelfConnect Win32 send, no hidden headless-only step
+```
+
+Observed limits:
+
+- without Ollama JSON mode, Hermes returned malformed JSON three times;
+- with JSON mode, Hermes returned valid JSON but omitted the nonce until the
+  wrapper appended it;
+- when asked for a safe file-repair plan, Hermes gave a generic repair strategy
+  instead of a precise SelfConnect tool plan.
+
+That means the right production shape is not "let the small model freely drive
+the machine." The right shape is visible model output plus strict wrappers:
+JSON mode, validation, target guard, nonce stamping, sandboxed tool execution,
+tests, and durable outbox/inbox records.
+
 ## Tool Boundary
 
 Safe local tools:
