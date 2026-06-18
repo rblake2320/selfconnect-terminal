@@ -45,6 +45,36 @@ Tests:
 tests/local-model-worker.test.ts
 ```
 
+## Live Baseline
+
+Run a real local-model action baseline:
+
+```text
+npm run baseline:local -- --model hermes3:3b
+```
+
+On 2026-06-18 this machine produced:
+
+```text
+model: hermes3:3b
+verdict: PASS
+tasks: 2/2 repaired and test-confirmed
+artifact: docs/results/local-model-baseline-hermes3_3b-1A4DEB31.json
+```
+
+The baseline performs real actions:
+
+- calls local Ollama on `127.0.0.1`;
+- asks the model for a strict JSON tool plan;
+- validates and safely canonicalizes the file target inside a temp sandbox;
+- applies `replace_text` only when the exact old text occurs once;
+- reruns failing Node tests before and after the repair;
+- writes a durable `outbox.jsonl` status record.
+
+Hermes needed one retry on the addition task because the first response used an
+unsafe file path. The wrapper rejected it, fed the validation error back into the
+local model, accepted the corrected plan, and the test went green.
+
 ## Tool Boundary
 
 Safe local tools:

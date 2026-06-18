@@ -34,6 +34,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.electron.json --noEmit && tsc -p tsconfig.cli.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "baseline:local": "node scripts/local-model-baseline.cjs",
     "rebuild": "electron-rebuild -f -w node-pty",
     "dist": "npm run build && electron-builder --config electron-builder.yml"
   },

@@ -1,0 +1,74 @@
+{
+  "verdict": "PASS",
+  "model": "hermes3:3b",
+  "ollamaUrl": "http://127.0.0.1:11434",
+  "nonce": "SC_TERM_BASELINE_1A4DEB31",
+  "redacted": true,
+  "startedAt": 1781821731313,
+  "elapsedMs": 21236,
+  "workRootHint": "%TEMP%\\selfconnect-terminal-local-baseline\\20260618222851-1A4DEB31",
+  "outboxFile": "outbox.jsonl",
+  "tasks": [
+    {
+      "task": "add",
+      "verdict": "PASS",
+      "attempts": [
+        {
+          "attempt": 1,
+          "rawHash": "843190d5e2ea4b08dc0a493fc5632a5ca1d385e7c83e1fe74400e5bdf224eebe",
+          "valid": false,
+          "error": "file path is not sandbox-safe"
+        },
+        {
+          "attempt": 2,
+          "rawHash": "ae3693c2e5d20cfbbd416d923d1c168e63bd910bb7c17a3da486246bf3548a55",
+          "valid": true,
+          "error": ""
+        }
+      ],
+      "initialReturnCode": 1,
+      "finalReturnCode": 0,
+      "outboxWritten": true,
+      "patch": {
+        "beforeHash": "3287c2099845184d0cb7949a08e88a646e51520fb82bb346cc71dc39850b751e",
+        "afterHash": "0ec5062faab170572a435284b5253963013467df51ba80c8508952311335954a"
+      },
+      "initialOutputHash": "ceebc750ca5dbc0d51af91fd98e52986916768ec6d903c2b8770a759fdbdf7f2",
+      "finalOutputHash": "9707a5b510ff8a8364918d748422c7f2d11b6d0685ab394f9270206315397eb8"
+    },
+    {
+      "task": "greeting",
+      "verdict": "PASS",
+      "attempts": [
+        {
+          "attempt": 1,
+          "rawHash": "19aa471f3644611ae37e02cb1f1656f46707104a841115d8dd96a333806f561b",
+          "valid": true,
+          "error": ""
+        }
+      ],
+      "initialReturnCode": 1,
+      "finalReturnCode": 0,
+      "outboxWritten": true,
+      "patch": {
+        "beforeHash": "ee24ee51c283a997fa00eda72c40245cc5129c39faed4624327fb8028f4d7cb8",
+        "afterHash": "15de20fd1d20c4099d75cf843d7b8889b7fcee73d047c8341061a0df18bd7b84"
+      },
+      "initialOutputHash": "4229b551804508b98cc65e879386f2a787683c1753516fa63fdcb36c1be78ea1",
+      "finalOutputHash": "5b9422e87144c681a5e445d9fa1e81cc3e2d0b4471eb55fc2f191c41617631f6"
+    }
+  ],
+  "baseline": {
+    "tasksRun": 2,
+    "passed": 2,
+    "failed": 0,
+    "retriesAllowed": 3,
+    "realActions": [
+      "ollama_generate",
+      "strict_json_validate",
+      "sandbox_replace_text",
+      "node_test_before_after",
+      "durable_outbox_write"
+    ]
+  }
+}
