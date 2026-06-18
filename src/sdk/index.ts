@@ -191,3 +191,4 @@ export class SelfConnectClient {
 
 export type { DaemonConfig } from '../daemon/config';
 export * from '../shared/contracts';
+export * from '../daemon/local-model-worker';
