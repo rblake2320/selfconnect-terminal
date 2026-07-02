@@ -13,12 +13,23 @@ import '@xterm/xterm/css/xterm.css';
  * `slashRun` (daemon-side: parsed, identity-stamped, audited as command.slash)
  * and the formatted result is printed back into the terminal view. /clear wipes
  * the screen; /resume repaints the restored scrollback.
+ *
+ * Clipboard:
+ *   Copy  — Ctrl+C (with selection) or right-click: xterm selection → IPC bridge
+ *            → Electron clipboard. Ctrl+C with no selection passes through as ^C.
+ *   Paste — Ctrl+V: xterm handles natively (paste event on its internal textarea →
+ *            onData → PTY). Right-click with no selection: IPC bridge reads
+ *            clipboard → term.paste() which applies bracketed-paste markers exactly
+ *            as xterm would. We do NOT intercept Ctrl+V or the paste event — letting
+ *            xterm own that path removes an async IPC round-trip from the hot path
+ *            and avoids silent failures when clipboardData is empty.
  */
 export function TerminalView(): React.JSX.Element {
   const hostRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!hostRef.current) return;
+    const host = hostRef.current;
     const term = new Terminal({
       fontFamily: 'ui-monospace, "Cascadia Code", "Consolas", monospace',
       fontSize: 13,
@@ -27,7 +38,7 @@ export function TerminalView(): React.JSX.Element {
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
-    term.open(hostRef.current);
+    term.open(host);
     fit.fit();
 
     const BACKSPACE = String.fromCharCode(127);
@@ -91,7 +102,62 @@ export function TerminalView(): React.JSX.Element {
       write(data);
     });
 
-    const offData = window.selfconnect.onPtyData((data) => term.write(data));
+    const offData = window.selfconnect.onPtyData((data) => {
+      term.write(data);
+    });
+
+    // --- Copy / paste -------------------------------------------------------
+    // Copy uses the IPC bridge (Electron clipboard module in the main process)
+    // because xterm's selection is not a DOM selection so the browser's own
+    // copy mechanism would grab an empty string.
+    const copyText = async (text: string): Promise<void> => {
+      if (!text) return;
+      try {
+        await window.selfconnect.clipboardWrite(text);
+      } catch {
+        try {
+          await navigator.clipboard.writeText(text);
+        } catch { /* nothing more we can do */ }
+      }
+    };
+
+    // Ctrl+C: copy selection when present; otherwise pass through as interrupt.
+    // Ctrl+V is intentionally NOT intercepted here — xterm handles it natively
+    // via the paste event on its internal textarea, which fires onData → PTY.
+    term.attachCustomKeyEventHandler((e) => {
+      if (e.type !== 'keydown') return true;
+      if (!(e.ctrlKey || e.metaKey)) return true;
+      if (e.key.toLowerCase() === 'c') {
+        const sel = term.getSelection();
+        if (sel) {
+          void copyText(sel);
+          return false; // consume; don't also send ^C
+        }
+      }
+      return true;
+    });
+
+    // Right-click: PuTTY-style — copy if text is selected, paste if not.
+    // Paste goes through term.paste() so xterm applies bracketed-paste markers
+    // exactly as it would for a native Ctrl+V paste.
+    const onContextMenu = async (e: MouseEvent): Promise<void> => {
+      e.preventDefault();
+      const sel = term.getSelection();
+      if (sel) {
+        void copyText(sel);
+        return;
+      }
+      try {
+        const text = await window.selfconnect.clipboardRead();
+        if (text) term.paste(text);
+      } catch {
+        try {
+          const text = await navigator.clipboard.readText();
+          if (text) term.paste(text);
+        } catch { /* clipboard unavailable */ }
+      }
+    };
+    host.addEventListener('contextmenu', onContextMenu);
 
     const resize = () => {
       fit.fit();
@@ -102,6 +168,7 @@ export function TerminalView(): React.JSX.Element {
 
     return () => {
       window.removeEventListener('resize', resize);
+      host.removeEventListener('contextmenu', onContextMenu);
       offData();
       onInput.dispose();
       term.dispose();

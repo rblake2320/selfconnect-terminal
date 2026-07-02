@@ -1382,6 +1382,20 @@ export function createMockBridge(): SelfConnectApi {
     async labLatest(): Promise<LabReport | null> {
       return sim.lab;
     },
+    async clipboardRead(): Promise<string> {
+      try {
+        return await navigator.clipboard.readText();
+      } catch {
+        return '';
+      }
+    },
+    async clipboardWrite(text: string): Promise<void> {
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch {
+        /* preview-only; ignore */
+      }
+    },
     onPtyData(handler: (data: string) => void): () => void {
       ptyHandlers.add(handler);
       // Print the intro banner once the terminal subscribes.

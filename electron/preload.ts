@@ -37,6 +37,8 @@ const IPC = {
   sessionResume: 'session:resume',
   replayEvents: 'replay:events',
   labLatest: 'lab:latest',
+  clipboardRead: 'clipboard:read',
+  clipboardWrite: 'clipboard:write',
   busEvent: 'bus:event',
   ptyData: 'pty:data',
 } as const;
@@ -85,6 +87,12 @@ const api: SelfConnectApi = {
   },
   labLatest(): Promise<LabReport | null> {
     return ipcRenderer.invoke(IPC.labLatest) as Promise<LabReport | null>;
+  },
+  clipboardRead(): Promise<string> {
+    return ipcRenderer.invoke(IPC.clipboardRead) as Promise<string>;
+  },
+  clipboardWrite(text: string): Promise<void> {
+    return ipcRenderer.invoke(IPC.clipboardWrite, { text }) as Promise<void>;
   },
   onPtyData(handler: (data: string) => void): () => void {
     const listener = (_e: unknown, data: string) => handler(data);

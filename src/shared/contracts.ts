@@ -368,6 +368,9 @@ export type ReviewResult = z.infer<typeof ReviewResultSchema>;
 export const PtyInputSchema = z.object({ data: z.string() });
 export type PtyInput = z.infer<typeof PtyInputSchema>;
 
+export const ClipboardWriteSchema = z.object({ text: z.string() });
+export type ClipboardWrite = z.infer<typeof ClipboardWriteSchema>;
+
 export const PtyResizeSchema = z.object({
   cols: z.number().int().positive(),
   rows: z.number().int().positive(),
@@ -441,6 +444,10 @@ export const IPC = {
   replayEvents: 'replay:events',
   // v3c renderer -> main (invoke)
   labLatest: 'lab:latest',
+  // clipboard (invoke) — main owns the OS clipboard; the sandboxed renderer
+  // cannot reach navigator.clipboard reliably, so it goes through here.
+  clipboardRead: 'clipboard:read',
+  clipboardWrite: 'clipboard:write',
   // main -> renderer (send)
   busEvent: 'bus:event',
   ptyData: 'pty:data',

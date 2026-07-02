@@ -42,9 +42,25 @@ export class OllamaProvider implements ModelProvider {
         system: req.system,
         prompt: req.prompt,
         stream: false,
+        // Ollama defaults num_ctx to 4096, which silently truncates large review
+        // snapshots regardless of the model's real ceiling (gemma3: 131072). Raise
+        // the window so session-scale review actually sees its input; low temp for
+        // deterministic, review-grade output.
+        options: {
+          num_ctx: 32768,
+          temperature: 0.2,
+        },
       }),
     });
-    if (!res.ok) throw new Error(`Ollama error HTTP ${res.status}`);
+    if (!res.ok) {
+      // Surface the response body — a bare "HTTP 404" hides Ollama's actual
+      // message (e.g. "model 'X' not found"), which is what you need to debug.
+      const body = await res.text().catch(() => '');
+      throw new Error(
+        `Ollama ${res.status} ${res.statusText} on /api/generate ` +
+          `(model=${req.model || this.model}): ${body.slice(0, 300)}`,
+      );
+    }
     const data = (await res.json()) as {
       response?: string;
       prompt_eval_count?: number;

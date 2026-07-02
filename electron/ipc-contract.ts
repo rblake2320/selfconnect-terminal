@@ -44,6 +44,10 @@ export interface SelfConnectApi {
   replayEvents(sessionId?: string): Promise<LedgerEntry[]>;
   /** v3c: the most recent harness-lab report (D6), or null. */
   labLatest(): Promise<LabReport | null>;
+  /** Read the OS clipboard (main-owned; renderer sandbox can't reach it). */
+  clipboardRead(): Promise<string>;
+  /** Write text to the OS clipboard (main-owned). */
+  clipboardWrite(text: string): Promise<void>;
   /** Subscribe to raw PTY byte stream. Returns an unsubscribe fn. */
   onPtyData(handler: (data: string) => void): () => void;
   /** Subscribe to identity-stamped bus events. Returns an unsubscribe fn. */

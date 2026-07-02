@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, ipcMain, clipboard, Menu } from 'electron';
 import { join } from 'node:path';
 import { config as loadDotenv } from 'dotenv';
 import { Daemon } from '../src/daemon/daemon';
@@ -14,6 +14,7 @@ import {
   PermissionModeSetSchema,
   ResumeSessionSchema,
   ReplayEventsSchema,
+  ClipboardWriteSchema,
 } from '../src/shared/contracts';
 
 // Provider keys live ONLY in the daemon process env (HARD RULE 1).
@@ -125,9 +126,24 @@ function registerIpc(): void {
     const { sessionId } = ReplayEventsSchema.parse(raw ?? {});
     return daemon!.replayEvents(sessionId);
   });
+
+  // v3c: latest harness-lab report for the renderer's LabPanel (polled).
+  ipcMain.handle(IPC.labLatest, async () => daemon!.latestLabReport());
+
+  // Clipboard. Main owns the OS clipboard so the sandboxed renderer doesn't
+  // depend on navigator.clipboard (which is blocked under sandbox: true).
+  ipcMain.handle(IPC.clipboardRead, async () => clipboard.readText());
+
+  ipcMain.handle(IPC.clipboardWrite, async (_e, raw) => {
+    const { text } = ClipboardWriteSchema.parse(raw);
+    clipboard.writeText(text);
+  });
 }
 
 app.whenReady().then(() => {
+  // Remove the default application menu so Electron's Edit→Copy/Paste
+  // accelerators don't race against xterm's IPC-based clipboard handling.
+  Menu.setApplicationMenu(null);
   wireDaemon();
   registerIpc();
   createWindow();

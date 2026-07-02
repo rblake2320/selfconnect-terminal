@@ -29,6 +29,8 @@ export interface SelfConnectApi {
   resumeSession(sessionId: string): Promise<ResumeResult>;
   replayEvents(sessionId?: string): Promise<LedgerEntry[]>;
   labLatest(): Promise<LabReport | null>;
+  clipboardRead(): Promise<string>;
+  clipboardWrite(text: string): Promise<void>;
   onPtyData(handler: (data: string) => void): () => void;
   onBusEvent(handler: (evt: BusEvent) => void): () => void;
 }
