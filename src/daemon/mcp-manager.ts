@@ -32,7 +32,7 @@ export class McpManager {
     const cfg = this.config.servers[server];
     if (!cfg) throw new Error(`unknown MCP server: ${server}`);
     const client = new McpClient(new StdioChannel(cfg));
-    await client.initialize();
+    try{await client.initialize();}catch(error){client.close();throw error;}
     this.clients.set(server, client);
     return client;
   }

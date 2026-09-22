@@ -72,7 +72,7 @@ describe('/simulate parses a raw JSON payload with mixed-case values preserved',
   it('splits off the tool name and treats the remainder as raw JSON (spaces inside JSON kept)', async () => {
     const target = join(dir, 'MixedCaseName.TXT');
     const r = await client.slash(
-      `/simulate write_file {"path": "${target}", "content": "Hello WORLD MixedCase"}`,
+      `/simulate write_file ${JSON.stringify({ path: target, content: 'Hello WORLD MixedCase' })}`,
     );
     expect(r.ok).toBe(true);
     // The case-sensitive path and content survive verbatim in the preview.

@@ -26,7 +26,8 @@ function Card(props: { title: string; children: React.ReactNode }): React.JSX.El
 export function CostKernelWidget(props: { cost: CostSnapshot }): React.JSX.Element {
   const { cost } = props;
   return (
-    <Card title="Cost Kernel">
+    <Card title="App call accounting">
+      <p className="muted">App-managed calls only; excludes hosted CLI agents. Savings are estimates. Efficiency starts at 100% before calls.</p>
       <div className="kv">
         <span>Session spend</span>
         <span>${cost.sessionSpendUsd.toFixed(4)}</span>
@@ -70,7 +71,8 @@ export function CostKernelWidget(props: { cost: CostSnapshot }): React.JSX.Eleme
 export function ContextGaugeWidget(props: { context: ContextSnapshot }): React.JSX.Element {
   const { context } = props;
   return (
-    <Card title="Context Gauge">
+    <Card title="App context">
+      <p className="muted">App-managed context only; excludes Claude and Codex shell sessions.</p>
       <div className={`gauge gauge-${context.level}`}>
         <div className="gauge-fill" style={{ width: `${context.pressure}%` }} />
       </div>
@@ -108,7 +110,7 @@ export function ModelRouterWidget(props: {
       {props.route && (
         <>
           <div className="kv">
-            <span>Active</span>
+            <span>Selected route</span>
             <span>
               {props.route.provider}/{props.route.model}{' '}
               <span className={`tag tag-${props.route.tier}`}>{props.route.tier}</span>
@@ -123,8 +125,11 @@ export function ModelRouterWidget(props: {
           checked={props.localOnly}
           onChange={(e) => props.onToggleLocalOnly(e.target.checked)}
         />
-        Local-only mode
+        App cloud calls: local only
       </label>
+      <div className="route-reason">
+        Blocks the app&apos;s own model and Jev calls. Does not firewall the interactive shell.
+      </div>
       <div className="liveness">
         {props.liveness.map((l) => (
           <div key={l.kind} className="kv">
@@ -177,7 +182,8 @@ export function AgentMeshWidget(props: {
 }): React.JSX.Element {
   const peers = props.peers ?? [];
   return (
-    <Card title="Agent Mesh">
+      <Card title="App roles and mailbox">
+      <p className="muted">Internal app roles; these are not connected terminal agents.</p>
       {props.agents.map((a) => (
         <div key={a.agentId} className="kv">
           <span>
@@ -218,7 +224,10 @@ export function PermissionModeWidget(props: {
 }): React.JSX.Element {
   const modes: PermissionMode[] = ['plan', 'ask', 'auto'];
   return (
-    <Card title="Permission Mode">
+    <Card title="Tool permissions">
+      <div className="route-reason">
+        Applies to app tools; the interactive shell runs your commands directly.
+      </div>
       <div className="seg">
         {modes.map((m) => (
           <button

@@ -6,3 +6,16 @@ data/
 .env
 *.log
 .DS_Store
+
+# Private raw local acceptance evidence; publish sanitized verification summaries.
+docs/audit-20260922/
+docs/jev-20260922/
+docs/ecosystem-20260922/
+docs/REALITY_AUDIT.md
+docs/SELFCONNECT_COVERAGE.md
+bridge/*.png
+bridge/sc-hwnd.ps1
+*.dpapi
+
+# Reproducible browser preview build output
+dist-preview/

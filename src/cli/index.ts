@@ -239,6 +239,7 @@ export async function main(argv: string[]): Promise<number> {
         const out = rest[2] ?? `${bundle.sessionId}.screplay`;
         writeFileSync(out, JSON.stringify(bundle, null, 2), 'utf8');
         print(`wrote replay bundle to ${out} (${bundle.events.length} events, ${bundle.checkpoints.length} checkpoints)`);
+        print('Replay preserves the global chain and may include interleaved events from other sessions. Inspect before sharing.');
         return 0;
       }
       if (sub === 'verify') {

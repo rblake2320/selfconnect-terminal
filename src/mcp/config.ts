@@ -19,6 +19,6 @@ export function loadMcpConfig(path: string): McpServersFile {
   try {
     return McpServersFileSchema.parse(JSON.parse(readFileSync(path, 'utf8')));
   } catch {
-    return { servers: {} };
+    throw new Error(`Invalid MCP configuration at ${path}. Fix its JSON and server definitions.`);
   }
 }

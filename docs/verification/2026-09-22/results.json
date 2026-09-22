@@ -1,0 +1,337 @@
+{
+  "exportedAt": "2026-09-22T17:16:22.541566+00:00",
+  "scope": "Sanitized observations; raw outputs remain in private local archive",
+  "suites": {
+    "daily_terminal": {
+      "sourceSha256": "0a1a7644d9d7581b925ee57ab6cd338b4680ffe61c529c4556aeb586f5366c7b",
+      "checks": [
+        {
+          "name": "malformed input IPC leaves app responsive",
+          "outcome": "Worked"
+        },
+        {
+          "name": "packaged keyboard URL reaches real shell",
+          "outcome": "Worked"
+        },
+        {
+          "name": "agent slash command reaches running child",
+          "outcome": "Worked"
+        },
+        {
+          "name": "native clipboard paste reaches shell",
+          "outcome": "Worked"
+        },
+        {
+          "name": "Jev preview contains actual shell error",
+          "outcome": "Worked"
+        },
+        {
+          "name": "local-only disables cloud send",
+          "outcome": "Worked"
+        },
+        {
+          "name": "packaged Jev uses real key and returns advisory",
+          "outcome": "Worked"
+        },
+        {
+          "name": "packaged ledger verifies",
+          "outcome": "Worked"
+        },
+        {
+          "name": "cloud preference saved",
+          "outcome": "Worked"
+        },
+        {
+          "name": "shutdown saves actual scrollback",
+          "outcome": "Worked"
+        },
+        {
+          "name": "relaunch restores preference",
+          "outcome": "Worked"
+        },
+        {
+          "name": "relaunch lists previous saved session",
+          "outcome": "Worked"
+        },
+        {
+          "name": "saved history UI reads real prior output",
+          "outcome": "Worked"
+        },
+        {
+          "name": "history preserves active session",
+          "outcome": "Worked"
+        }
+      ],
+      "passed": 14,
+      "total": 14,
+      "hasError": false
+    },
+    "mcp": {
+      "sourceSha256": "611c19613afd88a1de6c1e262286c96e552ad42fc9b0b476c3559c41d2ecc835",
+      "checks": [
+        {
+          "name": "installed exe present",
+          "outcome": "Worked"
+        },
+        {
+          "name": "cli mcp server build present",
+          "outcome": "Worked"
+        },
+        {
+          "name": "installed app lists configured MCP servers",
+          "outcome": "Worked"
+        },
+        {
+          "name": "real stdio MCP discovery: selfconnect server tools",
+          "outcome": "Worked"
+        },
+        {
+          "name": "real stdio MCP discovery: probe server tools",
+          "outcome": "Worked"
+        },
+        {
+          "name": "real interop: external Python SelfConnect SDK MCP server (sc_mcp.py) tools/list",
+          "outcome": "Worked"
+        },
+        {
+          "name": "real interop: TS app calls the Python MCP server read-only doctor tool",
+          "outcome": "Worked"
+        },
+        {
+          "name": "real MCP tool call returns child-process result",
+          "outcome": "Worked"
+        },
+        {
+          "name": "app calls its own read-only MCP server (ledger_verify)",
+          "outcome": "Worked"
+        },
+        {
+          "name": "ledger records mcp.call and mcp.result",
+          "outcome": "Worked"
+        },
+        {
+          "name": "unknown MCP server refused",
+          "outcome": "Worked"
+        },
+        {
+          "name": "unknown MCP tool refused by server and surfaced as error",
+          "outcome": "Worked"
+        },
+        {
+          "name": "malformed MCP args rejected before spawn/call",
+          "outcome": "Worked"
+        },
+        {
+          "name": "outbound MCP args pass the redactor (secret-looking arg not sent verbatim)",
+          "outcome": "Worked"
+        },
+        {
+          "name": "plan mode blocks mutating MCP call via app /mcp route",
+          "outcome": "Worked"
+        }
+      ],
+      "passed": 15,
+      "total": 15,
+      "hasError": false
+    },
+    "native_transport": {
+      "sourceSha256": "547fbdb82af57039f9bf024f94f4e21e5a07bfd24541575a68547b127dd9c4e1",
+      "checks": [
+        {
+          "name": "stale PID refused",
+          "outcome": "Worked"
+        },
+        {
+          "name": "guarded core send into installed SCT executes exact command",
+          "outcome": "Worked"
+        },
+        {
+          "name": "core readback includes challenge",
+          "outcome": "Worked"
+        }
+      ],
+      "passed": 3,
+      "total": 3,
+      "hasError": false
+    },
+    "native_mesh_ui": {
+      "sourceSha256": "1817712cf913e4cc5db5b7c21080b6c705aee3202d2e95fcc623108e57e81b0e",
+      "checks": [
+        {
+          "name": "UI reads real native window identity",
+          "outcome": "Worked"
+        },
+        {
+          "name": "UI joins canonical registry with its actual window",
+          "outcome": "Worked"
+        },
+        {
+          "name": "Observed existing peer agents",
+          "outcome": "Worked"
+        },
+        {
+          "name": "Repeat join retains identity",
+          "outcome": "Worked"
+        },
+        {
+          "name": "Malformed IPC rejected",
+          "outcome": "Worked"
+        },
+        {
+          "name": "Accounting and roles clearly scoped",
+          "outcome": "Worked"
+        }
+      ],
+      "passed": 6,
+      "total": 6,
+      "hasError": false
+    },
+    "four_agent_crash": {
+      "sourceSha256": "f647d468ddd0af6b28f6d19ba7d11933c7f2c5d0c8d080ff580714428fb52c94",
+      "checks": [
+        {
+          "name": "Analyst window registered alongside existing peer",
+          "outcome": "Worked"
+        },
+        {
+          "name": "New real agent independently writes shared task receipt",
+          "outcome": "Worked"
+        },
+        {
+          "name": "Fourth agent consumes analyst challenge and checkpoints",
+          "outcome": "Worked"
+        },
+        {
+          "name": "Crash target bound to test-owned process",
+          "outcome": "Worked"
+        },
+        {
+          "name": "Other terminal responds after crash",
+          "outcome": "Worked"
+        },
+        {
+          "name": "Surviving agent continues shared task after crash",
+          "outcome": "Worked"
+        },
+        {
+          "name": "Reopened profile retains precrash saved output",
+          "outcome": "Worked"
+        },
+        {
+          "name": "Explicitly resumed agent consumes survivor work",
+          "outcome": "Worked"
+        },
+        {
+          "name": "Dead terminal absent and replacement visible",
+          "outcome": "Worked"
+        }
+      ],
+      "passed": 9,
+      "total": 9,
+      "hasError": false
+    },
+    "jev_wiring": {
+      "sourceSha256": "897ee77bacc5a024c0fc36a4f2a63f6c23fc70d87cc4a4727e21c78d5d0e6071",
+      "checks": [
+        {
+          "name": "fresh profile: ledger OK, zero app spend, app context 0, local-only on by default",
+          "outcome": "Worked"
+        },
+        {
+          "name": "router liveness is a real probe (ollama reported offline while not running)",
+          "outcome": "Worked"
+        },
+        {
+          "name": "Jev key configured in this profile (DPAPI file outside userData)",
+          "outcome": "Worked"
+        },
+        {
+          "name": "real test run completed inside installed PTY",
+          "outcome": "Worked"
+        },
+        {
+          "name": "Jev live reads the real success output as success",
+          "outcome": "Worked"
+        },
+        {
+          "name": "real shell error produced inside installed PTY",
+          "outcome": "Worked"
+        },
+        {
+          "name": "Jev live reads the real error output as error + check_path",
+          "outcome": "Worked"
+        },
+        {
+          "name": "local-only blocks a third Jev send",
+          "outcome": "Worked"
+        },
+        {
+          "name": "ledger recorded both Jev round-trips",
+          "outcome": "Worked"
+        },
+        {
+          "name": "Cost Kernel still 0: Jev is excluded by design and no app model call was made",
+          "outcome": "Worked"
+        },
+        {
+          "name": "App context still 0: PTY work does not flow through the app agent loop (by design, now labelled)",
+          "outcome": "Worked"
+        },
+        {
+          "name": "typed PTY lines are not copied into the ledger (privacy by design)",
+          "outcome": "Worked"
+        },
+        {
+          "name": "Security Sentinel is wired to typed PTY lines (risk.detected recorded for a flagged line)",
+          "outcome": "Worked"
+        },
+        {
+          "name": "ledger chain still verifies after all of the above",
+          "outcome": "Worked"
+        },
+        {
+          "name": "session listed with real event count (not scrollback length)",
+          "outcome": "Worked"
+        }
+      ],
+      "passed": 15,
+      "total": 15,
+      "hasError": false
+    },
+    "connector": {
+      "sourceSha256": "cb2f823ad0e6cd5f1102d894b393a4fde7dec3589d34e65b8c8d12aa3b3e6ce2",
+      "checks": [
+        {
+          "name": "gh CLI with existing login runs inside installed PTY",
+          "outcome": "Worked"
+        },
+        {
+          "name": "read-only GitHub connector call returns real issue data in the app",
+          "outcome": "Worked"
+        },
+        {
+          "name": "connector output is visible to the app daemon (Jev preview, not sent)",
+          "outcome": "Worked"
+        },
+        {
+          "name": "connector output survives in saved history snapshot",
+          "outcome": "Worked"
+        },
+        {
+          "name": "skill consumption by an agent running inside installed SCT",
+          "outcome": "Blocked"
+        }
+      ],
+      "passed": 4,
+      "total": 5,
+      "hasError": false
+    }
+  },
+  "direct_peer_collaboration": {
+    "sourceSha256": "ee4fb6f3d8753fe126514a5deaecc1084a74419b007130d10c6b52c3eaff3bb9",
+    "messages": 5,
+    "verifiedReceived": 5,
+    "worked": true,
+    "leadRelaysAfterKickoff": 0
+  }
+}

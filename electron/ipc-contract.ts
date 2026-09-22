@@ -1,3 +1,5 @@
+import type { NativeMeshState } from '../src/shared/native-mesh';
+import type { JevSnapshot, JevAnalysis } from '../src/shared/jev';
 import type {
   BusEvent,
   ReviewResult,
@@ -18,6 +20,9 @@ import type {
  * which are Zod-validated on the daemon side before doing anything.
  */
 export interface SelfConnectApi {
+  nativeMesh(join: boolean): Promise<NativeMeshState>;
+  jevPreview(): Promise<JevSnapshot>;
+  jevAnalyze(snapshotId: string): Promise<JevAnalysis>;
   /** Send keystrokes to the PTY. */
   ptyInput(data: string): void;
   /** Resize the PTY. */
@@ -39,6 +44,7 @@ export interface SelfConnectApi {
   /** v2: list resumable sessions. */
   listSessions(): Promise<SessionSummary[]>;
   /** v2: resume a past session; returns restored scrollback. */
+  sessionHistory(sessionId: string): Promise<{sessionId:string;capturedAt:number;scrollback:string[]}>;
   resumeSession(sessionId: string): Promise<ResumeResult>;
   /** v3b: read-only ledger slice for the flight-recorder replay panel. */
   replayEvents(sessionId?: string): Promise<LedgerEntry[]>;

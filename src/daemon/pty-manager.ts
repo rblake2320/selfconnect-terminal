@@ -1,5 +1,6 @@
 import { platform } from 'node:os';
 import type { IPty } from 'node-pty';
+import { terminalEnvironment } from './shell-executor';
 
 /**
  * PTY manager — the ONLY module that imports node-pty (HARD constraint: isolate
@@ -29,6 +30,7 @@ function defaultShell(): string {
 
 export class PtyManager {
   private pty: IPty | null = null;
+  private disposed = false;
   private readonly shell: string;
   private dataHandlers = new Set<PtyDataHandler>();
   private exitHandlers = new Set<PtyExitHandler>();
@@ -46,15 +48,16 @@ export class PtyManager {
   }
 
   async spawn(): Promise<void> {
-    if (this.pty) return;
+    if (this.pty || this.disposed) return;
     // Lazy native import keeps the addon out of non-PTY code paths.
     const nodePty = await import('node-pty');
+    if (this.disposed) return;
     this.pty = nodePty.spawn(this.shell, [], {
       name: 'xterm-color',
       cols: this.opts.cols,
       rows: this.opts.rows,
       cwd: this.opts.cwd,
-      env: process.env as { [key: string]: string },
+      env: terminalEnvironment() as { [key: string]: string },
     });
     this.pty.onData((data) => {
       for (const h of this.dataHandlers) h(data);
@@ -83,6 +86,9 @@ export class PtyManager {
   }
 
   dispose(): void {
+    this.disposed = true;
+    this.dataHandlers.clear();
+    this.exitHandlers.clear();
     try {
       this.pty?.kill();
     } catch {

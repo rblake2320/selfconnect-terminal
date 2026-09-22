@@ -7,22 +7,15 @@ import '@xterm/xterm/css/xterm.css';
  * The main terminal surface. Renders an xterm.js terminal wired to the daemon's
  * real PTY over the narrow window.selfconnect bridge.
  *
- * v2: slash commands are intercepted HERE before they reach the PTY. While the
- * user is typing a line that begins with '/', keystrokes are buffered + locally
- * echoed (never sent to the shell). On Enter the buffered line is dispatched via
- * `slashRun` (daemon-side: parsed, identity-stamped, audited as command.slash)
- * and the formatted result is printed back into the terminal view. /clear wipes
- * the screen; /resume repaints the restored scrollback.
+ * App commands run from the separate command field. Every terminal keystroke,
+ * including URLs and CLI agent slash commands, goes to the real PTY.
  *
  * Clipboard:
  *   Copy  — Ctrl+C (with selection) or right-click: xterm selection → IPC bridge
  *            → Electron clipboard. Ctrl+C with no selection passes through as ^C.
- *   Paste — Ctrl+V: xterm handles natively (paste event on its internal textarea →
- *            onData → PTY). Right-click with no selection: IPC bridge reads
- *            clipboard → term.paste() which applies bracketed-paste markers exactly
- *            as xterm would. We do NOT intercept Ctrl+V or the paste event — letting
- *            xterm own that path removes an async IPC round-trip from the hot path
- *            and avoids silent failures when clipboardData is empty.
+ *   Paste — Ctrl+V or right-click reads the Electron clipboard through IPC.
+ *            The input queue keeps a following Enter behind the paste, and
+ *            term.paste preserves xterm bracketed-paste handling.
  */
 export function TerminalView(): React.JSX.Element {
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -34,73 +27,32 @@ export function TerminalView(): React.JSX.Element {
       fontFamily: 'ui-monospace, "Cascadia Code", "Consolas", monospace',
       fontSize: 13,
       cursorBlink: true,
+      screenReaderMode: true,
       theme: { background: '#0b0f14', foreground: '#cfe3f7' },
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.open(host);
+    term.textarea?.setAttribute('aria-label','SelfConnect terminal input');
     fit.fit();
 
-    const BACKSPACE = String.fromCharCode(127);
-    const CTRL_C = String.fromCharCode(3);
-
-    // Slash-line capture state. We only "capture" once a line is known to start
-    // with '/'; ordinary shell input passes straight through to the PTY.
-    let capturing = false;
-    let buffer = '';
-
-    const write = (s: string) => term.write(s);
-    const writeln = (s: string) => term.write(s.replace(/\n/g, '\r\n') + '\r\n');
-
-    const finishSlash = async () => {
-      const line = buffer;
-      capturing = false;
-      buffer = '';
-      write('\r\n');
-      const result = await window.selfconnect.slashRun(line);
-      if (result.clear) term.clear();
-      if (result.scrollback && result.scrollback.length > 0) {
-        term.clear();
-        for (const l of result.scrollback) writeln(l);
-      }
-      if (result.output) writeln(result.output);
-    };
-
+    // The PTY owns every keystroke, including URLs and agent slash commands.
+    // SelfConnect commands have a separate explicit UI field.
+    let inputQueue = Promise.resolve();
+    let deliveringPaste = false;
     const onInput = term.onData((data) => {
-      // Begin capturing if a fresh line starts with '/'.
-      if (!capturing && data === '/') {
-        capturing = true;
-        buffer = '/';
-        write('/');
-        return;
-      }
-      if (!capturing) {
-        window.selfconnect.ptyInput(data);
-        return;
-      }
-      // --- capturing a slash line ---
-      if (data === '\r' || data === '\n') {
-        void finishSlash();
-        return;
-      }
-      if (data === BACKSPACE || data === '\b') {
-        if (buffer.length > 0) {
-          buffer = buffer.slice(0, -1);
-          write('\b \b');
-        }
-        if (buffer.length === 0) capturing = false;
-        return;
-      }
-      if (data === CTRL_C) {
-        capturing = false;
-        buffer = '';
-        write('^C\r\n');
-        return;
-      }
-      // Printable.
-      buffer += data;
-      write(data);
+      if(deliveringPaste)window.selfconnect.ptyInput(data);
+      else inputQueue=inputQueue.then(()=>window.selfconnect.ptyInput(data));
     });
+    const pasteClipboard = () => {
+      inputQueue=inputQueue.then(async()=>{
+        try {
+          const text=await window.selfconnect.clipboardRead();
+          deliveringPaste=true;
+          try { if(text)term.paste(text); } finally { deliveringPaste=false; }
+        } catch { term.write('\r\n[Clipboard could not be read.]\r\n'); }
+      });
+    };
 
     const offData = window.selfconnect.onPtyData((data) => {
       term.write(data);
@@ -122,11 +74,13 @@ export function TerminalView(): React.JSX.Element {
     };
 
     // Ctrl+C: copy selection when present; otherwise pass through as interrupt.
-    // Ctrl+V is intentionally NOT intercepted here — xterm handles it natively
-    // via the paste event on its internal textarea, which fires onData → PTY.
+    // Explicit clipboard IPC is needed because this app has no Edit menu.
     term.attachCustomKeyEventHandler((e) => {
       if (e.type !== 'keydown') return true;
       if (!(e.ctrlKey || e.metaKey)) return true;
+      if(e.key.toLowerCase()==='v'){
+        e.preventDefault();pasteClipboard();return false;
+      }
       if (e.key.toLowerCase() === 'c') {
         const sel = term.getSelection();
         if (sel) {
@@ -147,15 +101,7 @@ export function TerminalView(): React.JSX.Element {
         void copyText(sel);
         return;
       }
-      try {
-        const text = await window.selfconnect.clipboardRead();
-        if (text) term.paste(text);
-      } catch {
-        try {
-          const text = await navigator.clipboard.readText();
-          if (text) term.paste(text);
-        } catch { /* clipboard unavailable */ }
-      }
+      pasteClipboard();
     };
     host.addEventListener('contextmenu', onContextMenu);
 
@@ -165,9 +111,12 @@ export function TerminalView(): React.JSX.Element {
     };
     resize();
     window.addEventListener('resize', resize);
+    const observer = new ResizeObserver(resize);
+    observer.observe(host);
 
     return () => {
       window.removeEventListener('resize', resize);
+      observer.disconnect();
       host.removeEventListener('contextmenu', onContextMenu);
       offData();
       onInput.dispose();

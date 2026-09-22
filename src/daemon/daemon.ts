@@ -22,6 +22,10 @@ import {
   type ProviderKind,
 } from '../shared/contracts';
 import { loadConfig, type DaemonConfig } from './config';
+import { randomUUID } from 'node:crypto';
+import { JevAssistant, cleanJevText, jevHash } from './jev';
+import type { JevSnapshot, JevAnalysis } from '../shared/jev';
+import { runShellCommand } from './shell-executor';
 import { EventBus } from './event-bus';
 import { IdentityRegistry } from './identity';
 import { AuditLedger } from './audit-ledger';
@@ -94,6 +98,8 @@ import { loadLimits } from './limits';
  */
 export class Daemon {
   readonly cfg: DaemonConfig;
+  readonly jev: JevAssistant;
+  private jevSnapshots = new Map<string, JevSnapshot>();
   readonly bus = new EventBus();
   identity: IdentityRegistry;
   readonly ledger: AuditLedger;
@@ -140,6 +146,7 @@ export class Daemon {
 
   constructor(cfg: DaemonConfig = loadConfig(), cwd: string = process.cwd()) {
     this.cfg = cfg;
+    this.jev = new JevAssistant({ apiKey: cfg.jevApiKey, keyFile: cfg.jevKeyFile, model: cfg.jevModel, timeoutMs: cfg.jevTimeoutMs });
     this.identity = new IdentityRegistry();
     this.ledger = new AuditLedger(cfg.ledgerPath);
     this.policy = new PolicyEngine({
@@ -196,6 +203,7 @@ export class Daemon {
       },
       requestApproval: (summary, preview) => this.gateToolApproval(summary, preview),
       authorizeDelegation: (agent, action) => this.authorizeDelegation(agent, action),
+      integrity: () => this.ledger.verifyChain().ok,
       baselineCloudPrice: {
         inputPerMillion: cfg.baselineInputPrice,
         outputPerMillion: cfg.baselineOutputPrice,
@@ -264,6 +272,28 @@ export class Daemon {
   }
 
   // -- Terminal ------------------------------------------------------------
+
+  previewJev(): JevSnapshot {
+    const key = this.jev.configured() ? this.jev.credential() : '';
+    const clean = cleanJevText(this.terminalLines.join('\n'), [key, this.cfg.anthropicApiKey, this.cfg.openaiCompatApiKey, this.cfg.searchApiKey]);
+    const snapshot: JevSnapshot = { id: randomUUID(), sessionId: this.identity.sessionId, capturedAt: Date.now(), text: clean.text, hash: jevHash(clean.text), redactions: clean.redactions, configured: this.jev.configured() };
+    this.jevSnapshots.clear();
+    this.jevSnapshots.set(snapshot.id, snapshot);
+    return snapshot;
+  }
+
+  async analyzeJev(snapshotId: string, approved: boolean): Promise<JevAnalysis> {
+    if (!approved) throw new Error('Approve the shown redacted snapshot before sending it to Jev.');
+    const snapshot = this.jevSnapshots.get(snapshotId);
+    if (!snapshot || Date.now()-snapshot.capturedAt > 120000 || snapshot.sessionId !== this.identity.sessionId) throw new Error('Snapshot expired or the session changed. Refresh the preview.');
+    if (!this.ledger.verifyChain().ok) throw new Error('Ledger integrity failed. Jev transmission is blocked.');
+    if (this.policy.localOnly) throw new Error('Local-only mode blocks Jev. Turn it off to send the shown snapshot to TypeSafe.');
+    this.jevSnapshots.delete(snapshotId);
+    this.record('jev.requested', { hash:snapshot.hash, characters:snapshot.text.length, redactions:snapshot.redactions, approved:true }, 'system');
+    const result = await this.jev.analyze(snapshot, () => !this.policy.localOnly && this.identity.sessionId === snapshot.sessionId);
+    this.record('jev.result', result, 'system');
+    return result;
+  }
 
   setTerminalContext(cwd: string, shell: string): void {
     this.terminalCwd = cwd;
@@ -668,7 +698,7 @@ export class Daemon {
     }
 
     // Policy + approval, identical to a normal cloud send (local => free/ungated).
-    const decision = this.router.route({ estimatedCostUsd: estimate.costUsd });
+    const decision = this.policy.evaluate({ tier: provider.tier, estimatedCostUsd: estimate.costUsd });
     if (decision.blocked) {
       const blocked: ConsultResult = {
         ok: false,
@@ -705,6 +735,7 @@ export class Daemon {
       }
     }
 
+    if (this.policy.evaluate({ tier: provider.tier, estimatedCostUsd: estimate.costUsd }).blocked) throw new Error('Provider call blocked after policy changed.');
     const completion = await provider.complete({
       model: provider.model,
       system:
@@ -801,12 +832,8 @@ export class Daemon {
 
   /** Run a verify shell command; resolve its exit code (non-zero on failure). */
   private async runVerify(command: string): Promise<number> {
-    const { spawn } = await import('node:child_process');
-    return new Promise<number>((resolve) => {
-      const child = spawn(command, { shell: true, cwd: this.terminalCwd });
-      child.on('error', () => resolve(127));
-      child.on('close', (code) => resolve(code ?? 0));
-    });
+    const result = await this.tools.invoke('bash', { command }, 'system');
+    return result.ok ? 0 : 1;
   }
 
   /** Re-score a past lab run from the session ledger (`selfconnect lab report`). */
@@ -875,7 +902,16 @@ export class Daemon {
   // -- Sessions ------------------------------------------------------------
 
   listSessions(): SessionSummary[] {
-    return this.sessions.list();
+    const chainOk=this.ledger.verifyChain().ok;
+    const counts=new Map<string,number>();
+    for(const event of this.ledger.all())if(event.sessionId)counts.set(event.sessionId,(counts.get(event.sessionId)||0)+1);
+    return this.sessions.list().map(session=>({...session,eventCount:counts.get(session.sessionId)||0,chainOk:chainOk&&counts.has(session.sessionId)}));
+  }
+
+  sessionHistory(sessionId: string): {sessionId:string;capturedAt:number;scrollback:string[]} {
+    const snapshot=this.sessions.load(sessionId);
+    if(!snapshot)throw new Error('Saved session is missing or damaged.');
+    return {sessionId:snapshot.sessionId,capturedAt:snapshot.lastActiveAt,scrollback:snapshot.scrollback};
   }
 
   /** Build the persistable snapshot of current daemon state. */
@@ -903,8 +939,8 @@ export class Daemon {
     try {
       this.sessions.save(this.buildSessionSnapshot());
       this.record('session.snapshot', { sessionId: this.identity.sessionId }, 'system');
-    } catch {
-      // best-effort persistence
+    } catch (error) {
+      throw new Error(`Session could not be saved: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -997,6 +1033,12 @@ export class Daemon {
   // -- MCP -----------------------------------------------------------------
 
   async mcpCall(server: string, tool: string, args: unknown): Promise<string> {
+    const result=await this.tools.invoke('mcp_call',{server,tool,args},'system');
+    if(!result.ok)throw new Error(result.error || result.blockReason || 'MCP call blocked');
+    return result.output;
+  }
+
+  private async executeMcpCall(server: string, tool: string, args: unknown): Promise<string> {
     this.record('mcp.call', { server, tool }, 'system');
     const { result, redactions } = await this.mcp.callTool(server, tool, args);
     if (redactions > 0) {
@@ -1012,46 +1054,42 @@ export class Daemon {
   private buildToolServices(): ToolServices {
     return {
       cwd: this.terminalCwd,
-      runBash: async (command) => {
+      runBash: async (command, background) => {
+        if (background) throw new Error('Background tool jobs are not supported; run them in the interactive terminal.');
         const finding = this.sentinel.inspectCommand(command);
         if (finding) this.record('risk.detected', finding, 'shell');
-        // Headless tool path does not own a live PTY; record intent + echo.
-        this.record('terminal.input', { line: command }, 'shell');
-        return `[bash queued] ${command}`;
+        this.record('terminal.input', { line: redact(command).redacted }, 'shell');
+        return runShellCommand(command, this.terminalCwd);
       },
       webFetch: async (url) => {
         const { total } = redact(url);
         if (total > 0) this.sentinel.addRedactions(total);
         try {
-          const res = await fetch(url);
+            const res = await fetch(url, {signal:AbortSignal.timeout(15000)});
+            if(!res.ok)throw new Error(`HTTP ${res.status}`);
           const text = await res.text();
           return redact(text).redacted.slice(0, 4000);
         } catch (err) {
-          return `web_fetch error: ${err instanceof Error ? err.message : String(err)}`;
+            throw new Error(`web_fetch failed: ${err instanceof Error ? err.message : String(err)}`);
         }
       },
       webSearch: async (query) => {
-        if (this.policy.localOnly) return 'blocked: web_search is cloud and LOCAL_ONLY is active';
-        if (!this.cfg.searchApiUrl) return 'web_search: no SEARCH_API_URL configured';
+          if (this.policy.localOnly) throw new Error('web_search is blocked by local-only mode');
+          if (!this.cfg.searchApiUrl) throw new Error('web_search: no SEARCH_API_URL configured');
         try {
           const url = `${this.cfg.searchApiUrl}?q=${encodeURIComponent(query)}`;
-          const res = await fetch(url, {
+            const res = await fetch(url, {
+              signal:AbortSignal.timeout(15000),
             headers: this.cfg.searchApiKey ? { authorization: `Bearer ${this.cfg.searchApiKey}` } : {},
           });
-          return redact(await res.text()).redacted.slice(0, 4000);
+            if(!res.ok)throw new Error(`HTTP ${res.status}`);
+            return redact(await res.text()).redacted.slice(0, 4000);
         } catch (err) {
-          return `web_search error: ${err instanceof Error ? err.message : String(err)}`;
+            throw new Error(`web_search failed: ${err instanceof Error ? err.message : String(err)}`);
         }
       },
-      spawnTask: async (prompt, allowedTools) => {
-        const taskAgent = this.identity.agent(`task_${Math.random().toString(36).slice(2, 6)}`);
-        this.mesh.register(taskAgent, 'system', true);
-        this.mesh.setState(taskAgent, 'running');
-        this.record('agent.spawn', { agentId: taskAgent, allowedTools }, 'system');
-        const result = `sub-agent handled: ${prompt.slice(0, 80)}`;
-        this.mesh.setState(taskAgent, 'exited');
-        this.record('agent.exit', { agentId: taskAgent }, 'system');
-        return result;
+      spawnTask: async () => {
+        throw new Error('No autonomous task executor is connected. Launch your CLI agent in the terminal; no task was executed.');
       },
       askUser: async (question) => {
         const granted = await this.gateToolApproval(`ask_user: ${question}`);
@@ -1082,7 +1120,7 @@ export class Daemon {
       a2aPeers: () => JSON.stringify(this.a2a.peerList()),
       sessionList: () => JSON.stringify(this.listSessions()),
       sessionResume: (sessionId) => JSON.stringify(this.resumeSession(sessionId)),
-      mcpCall: (server, tool, args) => this.mcpCall(server, tool, args),
+      mcpCall: (server, tool, args) => this.executeMcpCall(server, tool, args),
       todoWrite: (items) => {
         this.writeTodos(items.map((t) => ({ content: t.content, status: t.status as TodoStatus })));
         return `wrote ${items.length} todo(s)`;
@@ -1303,7 +1341,12 @@ export class Daemon {
   /** Build a signed session replay bundle (.screplay) (B flight recorder). */
   exportReplay(sessionId?: string): ReplayBundle {
     const sid = sessionId && sessionId.length ? sessionId : this.identity.sessionId;
-    const events = this.ledger.all().filter((e) => !e.sessionId || e.sessionId === sid);
+    const all = this.ledger.all();
+    const selected = all.filter((e) => !e.sessionId || e.sessionId === sid);
+    if (!selected.length) throw new Error('No ledger events exist for this session.');
+    // A replay carries the contiguous source range, including interleaved session
+    // records. The UI/CLI describes this explicitly; verification never skips links.
+    const events = all.filter((e) => e.seq >= selected[0].seq && e.seq <= selected[selected.length - 1].seq);
     const seqs = new Set(events.map((e) => e.seq));
     const checkpoints = this.ledgerCheckpoints.all().filter((c) => seqs.has(c.seq));
     const agentId = this.identity.agent('system');

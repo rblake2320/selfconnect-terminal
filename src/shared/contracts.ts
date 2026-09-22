@@ -28,6 +28,8 @@ export type Identity = z.infer<typeof IdentitySchema>;
  * material, governed event and must be identity-stamped + ledgered.
  */
 export const EventTypeSchema = z.enum([
+  'jev.requested',
+  'jev.result',
   'terminal.output',
   'terminal.input',
   'terminal.spawn',
@@ -427,6 +429,8 @@ export type ResumeResult = z.infer<typeof ResumeResultSchema>;
 // ---------------------------------------------------------------------------
 
 export const IPC = {
+  jevPreview: 'jev:preview',
+  jevAnalyze: 'jev:analyze',
   // renderer -> main (invoke)
   ptyInput: 'pty:input',
   ptyResize: 'pty:resize',
@@ -440,6 +444,8 @@ export const IPC = {
   permissionModeSet: 'permission:set',
   sessionsList: 'sessions:list',
   sessionResume: 'session:resume',
+  nativeMesh: 'native:mesh',
+  sessionHistory: 'session:history',
   // v3b renderer -> main (invoke)
   replayEvents: 'replay:events',
   // v3c renderer -> main (invoke)
