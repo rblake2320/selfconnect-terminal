@@ -1,0 +1,225 @@
+{
+  "date": "2026-09-22",
+  "matrix": [
+    {
+      "cli": "codex",
+      "model": "gpt-6-astra",
+      "exit": 0,
+      "elapsedMs": 5088,
+      "outcome": "Worked",
+      "reply": "SCT_MODEL_REPLY_OK"
+    },
+    {
+      "cli": "codex",
+      "model": "gpt-6-sol",
+      "exit": 0,
+      "elapsedMs": 4757,
+      "outcome": "Worked",
+      "reply": "SCT_MODEL_REPLY_OK"
+    },
+    {
+      "cli": "codex",
+      "model": "gpt-6-luna",
+      "exit": 0,
+      "elapsedMs": 4362,
+      "outcome": "Worked",
+      "reply": "SCT_MODEL_REPLY_OK"
+    },
+    {
+      "cli": "codex",
+      "model": "gpt-5.6-sol",
+      "exit": 0,
+      "elapsedMs": 5450,
+      "outcome": "Worked",
+      "reply": "SCT_MODEL_REPLY_OK"
+    },
+    {
+      "cli": "codex",
+      "model": "gpt-5.6-terra",
+      "exit": 0,
+      "elapsedMs": 5018,
+      "outcome": "Worked",
+      "reply": "SCT_MODEL_REPLY_OK"
+    },
+    {
+      "cli": "codex",
+      "model": "gpt-5.6-luna",
+      "exit": 0,
+      "elapsedMs": 4829,
+      "outcome": "Worked",
+      "reply": "SCT_MODEL_REPLY_OK"
+    },
+    {
+      "cli": "codex",
+      "model": "gpt-daybreak-blue-latest",
+      "exit": 0,
+      "elapsedMs": 5471,
+      "outcome": "Worked",
+      "reply": "SCT_MODEL_REPLY_OK"
+    },
+    {
+      "cli": "codex",
+      "model": "gpt-5.5",
+      "exit": 0,
+      "elapsedMs": 7561,
+      "outcome": "Worked",
+      "reply": "SCT_MODEL_REPLY_OK"
+    },
+    {
+      "cli": "claude",
+      "model": "sonnet",
+      "exit": 0,
+      "elapsedMs": 2448,
+      "outcome": "Worked",
+      "reply": "SCT_MODEL_REPLY_OK"
+    },
+    {
+      "cli": "claude",
+      "model": "opus",
+      "exit": 0,
+      "elapsedMs": 2586,
+      "outcome": "Worked",
+      "reply": "SCT_MODEL_REPLY_OK"
+    },
+    {
+      "cli": "claude",
+      "model": "haiku",
+      "exit": 0,
+      "elapsedMs": 2877,
+      "outcome": "Worked",
+      "reply": "SCT_MODEL_REPLY_OK"
+    },
+    {
+      "cli": "gemini",
+      "model": "default",
+      "exit": 1,
+      "elapsedMs": 2820,
+      "outcome": "Failed",
+      "reply": ""
+    },
+    {
+      "cli": "agy",
+      "model": "gemini-3.8-flash-high",
+      "exit": 0,
+      "elapsedMs": 7142,
+      "outcome": "Worked",
+      "reply": "SCT_MODEL_REPLY_OK\n"
+    },
+    {
+      "cli": "agy",
+      "model": "gemini-3.8-flash-medium",
+      "exit": 0,
+      "elapsedMs": 8257,
+      "outcome": "Worked",
+      "reply": "SCT_MODEL_REPLY_OK\n"
+    },
+    {
+      "cli": "agy",
+      "model": "gemini-3.8-flash-low",
+      "exit": 0,
+      "elapsedMs": 4894,
+      "outcome": "Worked",
+      "reply": "SCT_MODEL_REPLY_OK\n"
+    },
+    {
+      "cli": "agy",
+      "model": "gemini-3.7-flash-high",
+      "exit": 0,
+      "elapsedMs": 5779,
+      "outcome": "Worked",
+      "reply": "SCT_MODEL_REPLY_OK\n"
+    },
+    {
+      "cli": "agy",
+      "model": "gemini-3.7-flash-medium",
+      "exit": 0,
+      "elapsedMs": 8185,
+      "outcome": "Worked",
+      "reply": "SCT_MODEL_REPLY_OK\n"
+    },
+    {
+      "cli": "agy",
+      "model": "gemini-3.7-flash-low",
+      "exit": 0,
+      "elapsedMs": 5592,
+      "outcome": "Worked",
+      "reply": "SCT_MODEL_REPLY_OK\n"
+    },
+    {
+      "cli": "agy",
+      "model": "gemini-3.6-flash-high",
+      "exit": 0,
+      "elapsedMs": 11920,
+      "outcome": "Worked",
+      "reply": "SCT_MODEL_REPLY_OK\n"
+    },
+    {
+      "cli": "agy",
+      "model": "gemini-3.6-flash-medium",
+      "exit": 0,
+      "elapsedMs": 10784,
+      "outcome": "Worked",
+      "reply": "SCT_MODEL_REPLY_OK\n"
+    },
+    {
+      "cli": "agy",
+      "model": "gemini-3.6-flash-low",
+      "exit": 0,
+      "elapsedMs": 9580,
+      "outcome": "Worked",
+      "reply": "SCT_MODEL_REPLY_OK\n"
+    },
+    {
+      "cli": "agy",
+      "model": "gemini-3.1-pro-high",
+      "exit": 0,
+      "elapsedMs": 6899,
+      "outcome": "Worked",
+      "reply": "SCT_MODEL_REPLY_OK\n"
+    },
+    {
+      "cli": "agy",
+      "model": "gemini-3.1-pro-low",
+      "exit": 0,
+      "elapsedMs": 6507,
+      "outcome": "Worked",
+      "reply": "SCT_MODEL_REPLY_OK\n"
+    },
+    {
+      "cli": "agy",
+      "model": "claude-sonnet-4-6",
+      "exit": 0,
+      "elapsedMs": 5104,
+      "outcome": "Worked",
+      "reply": "SCT_MODEL_REPLY_OK\n"
+    },
+    {
+      "cli": "agy",
+      "model": "claude-opus-4-6-thinking",
+      "exit": 0,
+      "elapsedMs": 4895,
+      "outcome": "Worked",
+      "reply": "SCT_MODEL_REPLY_OK\n"
+    },
+    {
+      "cli": "agy",
+      "model": "gpt-oss-120b-medium",
+      "exit": 0,
+      "elapsedMs": 4706,
+      "outcome": "Worked",
+      "reply": "SCT_MODEL_REPLY_OK\n"
+    }
+  ],
+  "workedModelSelections": 25,
+  "interactive": {
+    "outcome": "Worked",
+    "scenario": "Normal interactive codex launch from home with existing user config returns computed answer through installed PTY",
+    "expected": "1542",
+    "oldVersionError": false
+  },
+  "receiptHashes": {
+    "sct-model-acceptance-xj4N6b": "2e76ed474bec532eae179bc9c569df1b414aa42598bdd1b338f38067cc3d47ff",
+    "sct-model-acceptance-ovsB7E": "7d54805f859f922fa4ee694975b67132e445cf5948a66a94ff847989bc1167d5",
+    "sct-interactive-model-nBIJnj": "e1236351143aa6d85b5856a8eeaa518381cb4c1128a28dbafb95025f754ed804"
+  }
+}

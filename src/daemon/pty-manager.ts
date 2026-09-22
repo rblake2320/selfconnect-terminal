@@ -57,7 +57,9 @@ export class PtyManager {
       cols: this.opts.cols,
       rows: this.opts.rows,
       cwd: this.opts.cwd,
-      env: terminalEnvironment() as { [key: string]: string },
+      // The renderer is xterm, regardless of the launching process's TERM.
+      // Inheriting TERM=dumb makes interactive agents stop at a confirmation.
+      env: { ...terminalEnvironment(), TERM: 'xterm-256color', COLORTERM: 'truecolor' } as { [key: string]: string },
     });
     this.pty.onData((data) => {
       for (const h of this.dataHandlers) h(data);
