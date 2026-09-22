@@ -265,7 +265,7 @@ export class ToolRegistry {
    * already supply one.
    */
   private preview(name: string, input: unknown, mutating: boolean, risk: RiskSeverity): SimulationPreview {
-    const p = simulateTool(name, input, mutating, this.deps.baselineCloudPrice ?? DEFAULT_PRICE);
+    const p = this.tools.get(name)?.preview?.(input) ?? simulateTool(name, input, mutating, this.deps.baselineCloudPrice ?? DEFAULT_PRICE);
     return p.risk ? p : { ...p, risk };
   }
 

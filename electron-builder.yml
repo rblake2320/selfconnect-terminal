@@ -35,3 +35,7 @@ nsis:
 
 portable:
   artifactName: ${productName}-${version}-portable.${ext}
+
+extraResources:
+  - from: scripts/computer-use-driver.py
+    to: computer-use-driver.py

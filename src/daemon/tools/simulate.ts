@@ -172,6 +172,9 @@ export function simulateTool(
       };
     }
 
+    case 'computer_use': {
+      return {...base,risk:'high',summary:'Desktop assist: one approved window, one action; no paid model request.',diff:JSON.stringify(input,null,2).slice(0,6000),estimatedCostUsd:0};
+    }
     case 'mcp_call': {
       const i = input as { server: string; tool: string };
       return { ...base, summary: `mcp call ${i.server}/${i.tool} (policy-gated, redacted)`, risk: 'medium' };

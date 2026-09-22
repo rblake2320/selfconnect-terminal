@@ -1,0 +1,329 @@
+{
+  "date": "2026-09-22",
+  "scope": "Windows x64 desktop_assist; owned Tk editor fixtures; separately billed model inference not run",
+  "build": "build-20260922-132502",
+  "signing": "unsigned local build",
+  "driver_identical_to_full_input_acceptance": true,
+  "payloads": {
+    "app.asar": "46556c4b5a12467627b5194dca029b3bdfcffba7de922c915bc97acfdc42c692",
+    "computer-use-driver.py": "6587587c8662dcd6907505c31671845e602ea0c82b0e5f6e9575290dbc3c806b"
+  },
+  "source": {
+    "typescript": "Worked",
+    "tests": 368,
+    "files": 48,
+    "result": "Worked"
+  },
+  "deterministic_native_focus_regressions": 4,
+  "suites": {
+    "partner_desktop": {
+      "receipt": "computer-use-partner-acceptance-full-input-fixed.json",
+      "sha256": "c21fc2897bc099c1b94d03703398aa85be16e6a67d4afb451d1c3644d1228759",
+      "checks": [
+        {
+          "name": "target exe present",
+          "outcome": "Worked"
+        },
+        {
+          "name": "fixture script present",
+          "outcome": "Worked"
+        },
+        {
+          "name": "TARGET fixture appears in Core enumeration with full identity",
+          "outcome": "Worked"
+        },
+        {
+          "name": "SINK fixture appears in Core enumeration (distinct hwnd)",
+          "outcome": "Worked"
+        },
+        {
+          "name": "plan mode refuses computer_use start",
+          "outcome": "Worked"
+        },
+        {
+          "name": "paid_api session refused (no paid call possible)",
+          "outcome": "Worked"
+        },
+        {
+          "name": "a DENIED start approval starts nothing",
+          "outcome": "Worked"
+        },
+        {
+          "name": "subscription_only session starts only after approval",
+          "outcome": "Worked"
+        },
+        {
+          "name": "first observe captures an artifact with sha256 and dimensions",
+          "outcome": "Worked"
+        },
+        {
+          "name": "each action needs its own approval (desktop_assist)",
+          "outcome": "Worked"
+        },
+        {
+          "name": "action bound to a stale observation is refused",
+          "outcome": "Worked"
+        },
+        {
+          "name": "out-of-order sequence is refused",
+          "outcome": "Worked"
+        },
+        {
+          "name": "non-allowlisted key (ctrl+s) is refused by schema",
+          "outcome": "Worked"
+        },
+        {
+          "name": "a DENIED type action executes nothing",
+          "outcome": "Worked"
+        },
+        {
+          "name": "foreign foreground: governed action is REFUSED (WINDOW_LOST contract)",
+          "outcome": "Worked"
+        },
+        {
+          "name": "foreign foreground: no collateral input in the sink, none in the target",
+          "outcome": "Worked"
+        },
+        {
+          "name": "WINDOW_LOST is terminal for that session",
+          "outcome": "Worked"
+        },
+        {
+          "name": "SCT approval window found in Core enumeration",
+          "outcome": "Worked"
+        },
+        {
+          "name": "SCT approval window brought to foreground before approving focus",
+          "outcome": "Worked"
+        },
+        {
+          "name": "a new session starts after WINDOW_LOST",
+          "outcome": "Worked"
+        },
+        {
+          "name": "session B first observe",
+          "outcome": "Worked"
+        },
+        {
+          "name": "focus executes on the authorized window",
+          "outcome": "Worked"
+        },
+        {
+          "name": "type line one executes",
+          "outcome": "Worked"
+        },
+        {
+          "name": "enter executes",
+          "outcome": "Worked"
+        },
+        {
+          "name": "type line two executes",
+          "outcome": "Worked"
+        },
+        {
+          "name": "post-action observation differs from the first (state changed)",
+          "outcome": "Worked"
+        },
+        {
+          "name": "TARGET really contains both lines (fixture file readback, independent of the app)",
+          "outcome": "Worked"
+        },
+        {
+          "name": "exact text: two lines joined by a single LF, no CR",
+          "outcome": "Worked"
+        },
+        {
+          "name": "no refused, denied, or foreign action ever reached any window",
+          "outcome": "Worked"
+        },
+        {
+          "name": "click at a point inside the authorized window: driver executed it (ok:true)",
+          "outcome": "Worked"
+        },
+        {
+          "name": "typing 40 lines: driver executed it (ok:true)",
+          "outcome": "Worked"
+        },
+        {
+          "name": "multiline type preserved newlines (fixture line count)",
+          "outcome": "Worked"
+        },
+        {
+          "name": "scroll with a point: driver executed it (ok:true)",
+          "outcome": "Worked"
+        },
+        {
+          "name": "scroll actually moved the view (driver lastChanged or fixture yview)",
+          "outcome": "Worked"
+        },
+        {
+          "name": "stopped session refuses further actions",
+          "outcome": "Worked"
+        },
+        {
+          "name": "nothing reached the target after stop",
+          "outcome": "Worked"
+        },
+        {
+          "name": "ledger holds computer-use events and still verifies",
+          "outcome": "Worked"
+        },
+        {
+          "name": "app paid spend stays $0",
+          "outcome": "Worked"
+        },
+        {
+          "name": "closing the target window makes the next action refuse (WINDOW_LOST)",
+          "outcome": "Worked"
+        }
+      ]
+    },
+    "exact_input_ui": {
+      "receipt": "computer-input-after.json",
+      "sha256": "46093267a1dd471b0d3aff2a905147e78b94f1f9de0033f8bc348abe6205dd1d",
+      "checks": [
+        {
+          "name": "desktop UI defaults to paid mode off",
+          "outcome": "Worked"
+        },
+        {
+          "name": "paid UI requires separate billing acknowledgment before starting",
+          "outcome": "Worked"
+        },
+        {
+          "name": "real UI start creates an approved subscription-only session",
+          "outcome": "Worked"
+        },
+        {
+          "name": "real UI stop ends the desktop session",
+          "outcome": "Worked"
+        },
+        {
+          "name": "Enter produces exactly one newline",
+          "outcome": "Worked"
+        },
+        {
+          "name": "Ctrl+A selects all, subsequent typing replaces all text",
+          "outcome": "Worked"
+        },
+        {
+          "name": "Space inserts a space",
+          "outcome": "Worked"
+        },
+        {
+          "name": "Ctrl+Home reaches document start",
+          "outcome": "Worked"
+        },
+        {
+          "name": "Ctrl+End reaches document end",
+          "outcome": "Worked"
+        },
+        {
+          "name": "PageUp moves toward earlier document content",
+          "outcome": "Worked"
+        },
+        {
+          "name": "PageDown moves toward later document content",
+          "outcome": "Worked"
+        },
+        {
+          "name": "Positive scroll moves viewport down",
+          "outcome": "Worked"
+        },
+        {
+          "name": "Negative scroll moves viewport up",
+          "outcome": "Worked"
+        },
+        {
+          "name": "Click moves insertion cursor at the target point",
+          "outcome": "Worked"
+        }
+      ]
+    },
+    "installed_billing": {
+      "receipt": "computer-installed-billing-final.json",
+      "sha256": "db3c02c4b3942036fe12648cbfb7498522cd9d845e34ea85f1ab8eebadd42a92",
+      "checks": [
+        {
+          "name": "installed configuration defaults to no paid computer API and local-only",
+          "outcome": "Worked"
+        },
+        {
+          "name": "installed controller refuses paid session without explicit runtime configuration",
+          "outcome": "Worked"
+        },
+        {
+          "name": "reservation survives a fresh billing instance",
+          "outcome": "Worked"
+        },
+        {
+          "name": "cumulative task cap refuses next request",
+          "outcome": "Worked"
+        },
+        {
+          "name": "unknown response retains full reservation",
+          "outcome": "Worked"
+        },
+        {
+          "name": "observed reservation overrun locks all later requests",
+          "outcome": "Worked"
+        },
+        {
+          "name": "corrupt billing data refuses requests",
+          "outcome": "Worked"
+        }
+      ]
+    },
+    "billing_disclosure_ui": {
+      "receipt": "computer-ui-billing-final.json",
+      "sha256": "12928e42f41d0940556b58483d879329e9e30067546619e9b13c60cb26db1926",
+      "checks": [
+        {
+          "name": "paid desktop checkbox is off by default",
+          "outcome": "Worked"
+        },
+        {
+          "name": "Jev billing notice is shown before any send",
+          "outcome": "Worked"
+        },
+        {
+          "name": "approval header displays the paid request cap",
+          "outcome": "Worked"
+        },
+        {
+          "name": "approval explicitly distinguishes API bill from subscription",
+          "outcome": "Worked"
+        },
+        {
+          "name": "real Deny button blocks the proposal",
+          "outcome": "Worked"
+        },
+        {
+          "name": "denial creates no model request event",
+          "outcome": "Worked"
+        }
+      ]
+    },
+    "parent_death": {
+      "receipt": "computer-parent-final.json",
+      "sha256": "408ec217d5c90a79fbb0ecddd0df5d3a76064a1872cc56fcc6c49a40df33bdb9",
+      "checks": [
+        {
+          "name": "parent-death interlock",
+          "outcome": "Worked"
+        }
+      ]
+    }
+  },
+  "live_paid_inference": {
+    "outcome": "Blocked",
+    "reason": "No specifically approved paid inference session; substituted HTTP adapter tests only.",
+    "provider_requests_during_desktop_acceptance": 0
+  },
+  "failed_evidence_retained": [
+    "computer-input-before.json",
+    "computer-input-after-fixture-race.json",
+    "computer-use-partner-acceptance-focus-only-130907.json",
+    "computer-acceptance-failed-sink-1305.json"
+  ]
+}

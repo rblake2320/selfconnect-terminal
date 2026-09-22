@@ -1,4 +1,5 @@
-import { nativeMeshState } from './native-mesh';
+import { ComputerToolInputSchema } from '../src/daemon/computer-use';
+import { nativeMeshState, nativeWindows } from './native-mesh';
 import { app, BrowserWindow, ipcMain, clipboard, Menu, dialog } from 'electron';
 import { join } from 'node:path';
 import { config as loadDotenv } from 'dotenv';
@@ -113,6 +114,16 @@ function wireDaemon(): void {
 }
 
 function registerIpc(): void {
+  ipcMain.handle(IPC.computerUse,async(_e,raw)=>{
+    const command=z.discriminatedUnion('operation',[z.object({operation:z.literal('windows')}).strict(),z.object({operation:z.literal('list')}).strict(),z.object({operation:z.literal('stop'),sessionId:z.string().uuid()}).strict(),z.object({operation:z.literal('image'),sessionId:z.string().uuid()}).strict(),...ComputerToolInputSchema.options]).parse(raw);
+    if(!win)throw Error('Window unavailable');
+    daemon!.configureComputerUse(app.isPackaged?join(process.resourcesPath,'computer-use-driver.py'):join(app.getAppPath(),'scripts','computer-use-driver.py'),join(app.getPath('userData'),'computer-evidence'),Number(win.getNativeWindowHandle().readBigUInt64LE()));
+    if(command.operation==='windows')return nativeWindows();
+    if(command.operation==='list')return daemon!.computerSessions();
+    if(command.operation==='stop')return daemon!.computerStop(command.sessionId);
+    if(command.operation==='image')return daemon!.computerImage(command.sessionId);
+    return daemon!.computerInvoke(command);
+  });
   ipcMain.handle(IPC.nativeMesh, async (_e, raw) => {
     const {join}=z.object({join:z.boolean()}).strict().parse(raw);
     if(!win || win.isDestroyed())throw new Error('Terminal window unavailable.');
@@ -232,6 +243,7 @@ function shutdown(): void {
   if(saveTimer)clearInterval(saveTimer);
   unsubscribeRenderer?.();
   unsubscribeRenderer = null;
+  daemon?.computerClose();
   daemon?.mcp.closeAll();
   pty?.dispose();
   pty = null;

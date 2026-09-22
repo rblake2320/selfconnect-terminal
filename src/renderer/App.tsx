@@ -1,3 +1,4 @@
+import { ComputerUsePanel } from './widgets/ComputerUsePanel';
 import React, { useCallback, useEffect, useState } from 'react';
 import type { BusEvent, PermissionMode, UiState } from '../shared/contracts';
 import { TerminalView } from './TerminalView';
@@ -133,6 +134,7 @@ export function App(): React.JSX.Element {
             <>
               <JevPanel localOnly={state.localOnly} sessionId={state.identity.sessionId} onLocalOnly={onToggleLocalOnly} />
               <NativeMeshPanel />
+          <ComputerUsePanel />
               <CostKernelWidget cost={state.cost} />
               <ContextGaugeWidget context={state.context} />
               <ModelRouterWidget

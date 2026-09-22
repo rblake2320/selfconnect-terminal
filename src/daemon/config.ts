@@ -8,6 +8,8 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 
 export interface DaemonConfig {
+  computerPaidEnabled?: boolean;
+  computerBillingFile?: string;
   jevApiKey: string;
   jevKeyFile: string;
   jevModel: string;
@@ -66,6 +68,8 @@ function bool(value: string | undefined, fallback: boolean): boolean {
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): DaemonConfig {
   return {
+    computerPaidEnabled: env.SELFCONNECT_COMPUTER_PAID_API === '1',
+    computerBillingFile: join(env.APPDATA || join(homedir(), '.config'), 'SelfConnect Terminal', 'computer-budget.json'),
     jevApiKey: env.JEV_API_KEY || '',
     jevKeyFile: env.SELFCONNECT_JEV_KEY_FILE || join(env.APPDATA || join(homedir(), '.config'), 'SelfConnect Terminal', 'jev-key.dpapi'),
     jevModel: env.JEV_MODEL || 'jev-latest',

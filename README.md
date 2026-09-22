@@ -13,6 +13,15 @@ and ledger gates apply to the daemon tool API, not arbitrary commands typed
 into the shell or external CLI agents. Local-only controls daemon cloud calls;
 it is not a firewall for your shell.
 
+### Governed desktop assist
+
+Desktop assist adds approved one-window observation, typing, keys, clicks and
+scrolling. Paid model suggestions are **off by default**, separately billed, and
+require configuration, session consent and approval for every request. There is
+no subscription-to-API fallback. Jev is also a separate API and may incur charges.
+See the [desktop guide](docs/COMPUTER_USE_PLAN.md) and
+[installed verification](docs/verification/2026-09-22/computer-use.md).
+
 ### Daily use with Jev
 
 Launch SelfConnect Terminal, work in the main terminal, and use **Preview recent
