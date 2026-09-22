@@ -115,3 +115,13 @@ not a repository feature or a globally disabled MCP integration for other users.
 Its receipt remains in the private evidence set. BPC/TSK identity corrections,
 local setup choices and the later computer-use proposal are preserved in the
 appropriate guides; [computer use remains a proposal](../../COMPUTER_USE_PLAN.md).
+
+## Subsequent owner cost restriction
+
+After the historical live acceptance, the owner required subscription-only work.
+No further paid model calls are authorized. The daily harness now defaults to
+local-only: its subsequent installed run passed 13 checks and explicitly skipped
+one live Jev check. Both dedicated live-API harnesses reject execution before
+startup without explicit opt-in; project instructions prohibit enabling that
+opt-in under the current policy. Existing CLI subscriptions remain the intended
+agent path. The computer-use proposal is subject to this restriction too.

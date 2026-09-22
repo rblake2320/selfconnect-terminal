@@ -2,6 +2,11 @@
 
 Status: design proposal, not implemented or included in today's runtime claims.
 
+Owner constraint: subscription-only. No paid model APIs, including Jev, Anthropic
+or OpenAI API calls. Use the existing authenticated CLI subscriptions; assess
+which computer-use capabilities are actually available through them before
+promising a model adapter. Do not enable API fallback or paid live acceptance.
+
 Computer use can be a selectable executor behind the existing identity, tool
 permission, approval and ledger interfaces. The executor owns local observation
 and action; a model proposes structured actions. Keep this distinct from native
@@ -26,7 +31,7 @@ Proposed bounded implementation:
    execution result and post-action observation. Validate screenshot capture/redaction
    before any external provider receives data.
 5. One model adapter and a bounded observe/propose/validate/execute/verify loop.
-   Select the provider and authorized cost ceiling before paid live calls.
+   Use a verified subscription-hosted agent path only; paid live calls are excluded.
 6. Installed-artifact acceptance on a benign owned test application, including
    wrong/stale target refusal, rejected action without side effects, focus loss,
    stop, timeout and crash recovery. Add a second adapter only after this passes.

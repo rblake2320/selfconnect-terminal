@@ -1,3 +1,4 @@
+if (process.env.SCT_ALLOW_PAID_API !== '1') throw new Error('Paid API acceptance is disabled. Current owner policy is subscription-only; do not enable without a new explicit authorization.');
 // Explicit live API acceptance. Uses the locally encrypted credential; never prints it.
 const { JevAssistant, cleanJevText, jevHash } = require('../dist/daemon/jev');
 const { loadConfig } = require('../dist/daemon/config');

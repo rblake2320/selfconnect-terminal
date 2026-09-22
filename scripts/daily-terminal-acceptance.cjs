@@ -5,6 +5,7 @@ const work=fs.mkdtempSync(path.join(os.tmpdir(),'sct-daily-'));
 const env={...process.env,SELFCONNECT_USER_DATA_DIR:path.join(work,'profile'),SELFCONNECT_A2A_MODE:'off'};
 for(const k of ['ELECTRON_RUN_AS_NODE','VITE_DEV_SERVER_URL','SELFCONNECT_LOCAL_ONLY'])delete env[k];
 const testedExe=process.env.SCT_TEST_EXE || path.join(root,'release/win-unpacked/SelfConnect Terminal.exe');
+const allowPaidApi=process.env.SCT_ALLOW_PAID_API==='1';
 const results={at:new Date().toISOString(),exe:testedExe,work,checks:[],errors:[]};let app;
 const check=(name,ok,detail)=>{results.checks.push({name,outcome:ok?'Worked':'Failed',detail});if(!ok)throw new Error(name);};
 const launch=()=>_electron.launch({executablePath:process.env.SCT_TEST_EXE || path.join(root,'release/win-unpacked/SelfConnect Terminal.exe'),args:['--disable-gpu'],cwd:work,env,timeout:25000});
@@ -34,16 +35,18 @@ async function fileReady(file){for(let i=0;i<50;i++){if(fs.existsSync(file))retu
  await page.getByRole('button',{name:'Preview recent output'}).click();
  const preview=await page.locator('#jev-preview').inputValue();check('Jev preview contains actual shell error',preview.toLowerCase().includes('cannot find'),{characters:preview.length});
  const send=page.getByRole('button',{name:'Send shown output to Jev'});check('local-only disables cloud send',await send.isDisabled(),{});
+ if(allowPaidApi){
  await page.getByRole('button',{name:'Enable cloud assistance'}).click();await send.click();
  await page.locator('.jev-result').waitFor({timeout:25000});const result=await page.locator('.jev-result').innerText();
  check('packaged Jev uses real key and returns advisory',result.includes('Error reported')&&result.includes('no commands executed'),{result});
+ }else{results.checks.push({name:'live Jev API call',outcome:'Blocked',detail:'Subscription-only default; no API call made.'});await page.evaluate(()=>window.selfconnect.setLocalOnly(true));}
  await page.screenshot({path:path.join(dir,'packaged-jev.png')});
  const ledger=await page.evaluate(()=>window.selfconnect.verifyLedger());check('packaged ledger verifies',ledger.ok,ledger);
  await app.close();app=null;
- const settings=JSON.parse(fs.readFileSync(path.join(work,'profile/settings.json'),'utf8'));check('cloud preference saved',settings.localOnly===false,settings);
+ const settings=JSON.parse(fs.readFileSync(path.join(work,'profile/settings.json'),'utf8'));check('cloud preference saved',settings.localOnly===!allowPaidApi,settings);
  const sessions=fs.readdirSync(path.join(work,'profile/data/sessions'));check('shutdown saves actual scrollback',sessions.some(f=>fs.readFileSync(path.join(work,'profile/data/sessions',f),'utf8').includes('The system cannot find the file specified.')),{});
  app=await launch();page=await app.firstWindow();await page.waitForFunction(()=>!!window.selfconnect);const state=await page.evaluate(()=>window.selfconnect.getState());
- check('relaunch restores preference',state.localOnly===false||state.policy?.localOnly===false,{stateKeys:Object.keys(state)});
+ check('relaunch restores preference',state.localOnly===!allowPaidApi||state.policy?.localOnly===!allowPaidApi,{stateKeys:Object.keys(state)});
  const previous=await page.evaluate(()=>window.selfconnect.listSessions());check('relaunch lists previous saved session',previous.length>=2,{});
  const old=previous.find(s=>s.sessionId!==state.identity.sessionId);
  await page.getByRole('button',{name:`View saved history for session ${old.sessionId}`}).click();

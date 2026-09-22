@@ -1,5 +1,10 @@
 # Daily use
 
+Current owner policy is subscription-only. Keep local-only enabled and use
+existing CLI subscriptions. Jev is a separate API and must remain disabled under
+this policy. Historical live Jev results predate this restriction.
+
+
 Open **SelfConnect Terminal** from the desktop shortcut. It opens your home
 folder with a real Windows shell. Use `cd` to enter any checked-out project, then
 run your normal GitHub CLI, Codex, Claude or other installed commands with their
@@ -41,8 +46,9 @@ editing; `npm run dist` retains the normal distribution configuration. The
 installer script keeps prior version folders and points the shortcut at the new
 one. User data and the encrypted key live outside those folders in AppData.
 
-The acceptance script launches an isolated profile and makes one explicitly
-requested live Jev diagnosis using the configured key. It saves machine-readable
+The acceptance script launches an isolated profile and skips paid API calls by
+default. The live Jev check requires SCT_ALLOW_PAID_API=1, which is prohibited
+under the current owner policy unless separately reauthorized. It saves machine-readable
 results and a screenshot under `docs/jev-20260922`. To test an installed copy,
 set `SCT_TEST_EXE` to its executable before running the script.
 

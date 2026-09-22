@@ -1,3 +1,4 @@
+if (process.env.SCT_ALLOW_PAID_API !== '1') throw new Error('Paid API acceptance is disabled. Current owner policy is subscription-only; do not enable without a new explicit authorization.');
 /**
  * Ecosystem partner lane — "is it wired?" check using Jev as the reader, against the INSTALLED exe.
  * Real cmd.exe PTY commands run in the app; Jev (TypeSafe, live, existing DPAPI key) classifies the
