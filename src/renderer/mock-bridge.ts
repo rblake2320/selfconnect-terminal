@@ -1308,6 +1308,8 @@ async function runReview(modeStr: string): Promise<ReviewResult> {
 
 export function createMockBridge(): SelfConnectApi {
   return {
+    async jevPreview() { throw new Error('Jev requires the real desktop app.'); },
+    async jevAnalyze() { throw new Error('Jev is not simulated in this preview.'); },
     ptyInput(data: string): void {
       handlePtyInput(data);
     },
@@ -1363,6 +1365,8 @@ export function createMockBridge(): SelfConnectApi {
     async listSessions(): Promise<SessionSummary[]> {
       return sim.sessions;
     },
+    async nativeMesh(): Promise<never> { throw new Error('Native mesh requires the desktop app.'); },
+    async sessionHistory(): Promise<{sessionId:string;capturedAt:number;scrollback:string[]}> { throw new Error('Saved terminal history requires the desktop app.'); },
     async resumeSession(sessionId: string): Promise<ResumeResult> {
       const sess = sim.sessions.find((s) => s.sessionId === sessionId);
       const scrollback = sess

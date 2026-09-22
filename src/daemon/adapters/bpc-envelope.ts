@@ -9,7 +9,8 @@ import {
 } from '../../shared/contracts';
 
 /**
- * BPC (Basic Protocol Communication) envelope — the on-the-wire format for A2A
+ * Legacy terminal mailbox envelope (Bpc name retained for wire compatibility).
+ * This is not the independent BPC protocol. The on-the-wire format for A2A
  * (agent-to-agent) messaging. Each peer conversation is a SHA-256 hash chain
  * exactly like the audit ledger: every envelope's hash covers its content plus
  * the previous envelope's hash, so any tamper/reorder/drop is detectable.

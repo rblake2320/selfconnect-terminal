@@ -1,3 +1,5 @@
+import type { NativeMeshState } from '../shared/native-mesh';
+import type { JevSnapshot, JevAnalysis } from '../shared/jev';
 import type {
   BusEvent,
   ReviewResult,
@@ -16,6 +18,9 @@ import type {
  * electron/ipc-contract.ts SelfConnectApi (which lives in the daemon tsconfig).
  */
 export interface SelfConnectApi {
+  nativeMesh(join: boolean): Promise<NativeMeshState>;
+  jevPreview(): Promise<JevSnapshot>;
+  jevAnalyze(snapshotId: string): Promise<JevAnalysis>;
   ptyInput(data: string): void;
   ptyResize(cols: number, rows: number): void;
   runReview(mode: string): Promise<ReviewResult>;
@@ -26,6 +31,7 @@ export interface SelfConnectApi {
   slashRun(line: string): Promise<SlashResult>;
   setPermissionMode(mode: PermissionMode): Promise<UiState>;
   listSessions(): Promise<SessionSummary[]>;
+  sessionHistory(sessionId: string): Promise<{sessionId:string;capturedAt:number;scrollback:string[]}>;
   resumeSession(sessionId: string): Promise<ResumeResult>;
   replayEvents(sessionId?: string): Promise<LedgerEntry[]>;
   labLatest(): Promise<LabReport | null>;

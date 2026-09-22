@@ -151,8 +151,15 @@ describe('ToolRegistry governance', () => {
     expect(blocked.blocked).toBe(true);
     expect(blocked.blockReason).toMatch(/plan mode/);
 
-    const ok = await registry.invoke('read_file', { path: join(dir, 'nope') });
+    writeFileSync(join(dir, 'present.txt'), 'present', 'utf8');
+    const ok = await registry.invoke('read_file', { path: join(dir, 'present.txt') });
     expect(ok.ok).toBe(true); // read-only runs even in plan mode
+    expect(ok.output).toContain('present');
+
+    // A missing file is a real failure, never ok:true with an error string.
+    const missing = await registry.invoke('read_file', { path: join(dir, 'nope') });
+    expect(missing.ok).toBe(false);
+    expect(missing.error).toMatch(/no such file/);
   });
 
   it('ask mode gates a mutating tool through approval (denied => blocked)', async () => {

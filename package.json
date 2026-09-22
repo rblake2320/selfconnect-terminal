@@ -1,7 +1,7 @@
 {
   "name": "selfconnect-terminal",
   "version": "3.0.0-rc.1",
-  "description": "SelfConnect Terminal — a governed agent execution surface with a real PTY terminal, live widgets, daemon-owned model routing, cost kernel, approval gates, secret redaction, a hash-chained audit ledger, session persistence, slash commands, an MCP client/server, a headless CLI + typed SDK, a governed tool layer, and live A2A (BPC/TSK) transport.",
+  "description": "Everyday SelfConnect desktop terminal with a real PTY, saved history, on-demand Jev triage and a separate governed tool API.",
   "author": "SelfConnect",
   "license": "MIT",
   "private": true,
@@ -37,7 +37,8 @@
     "baseline:local": "node scripts/local-model-baseline.cjs",
     "chat:local": "node scripts/local-model-visible-chat.cjs",
     "rebuild": "electron-rebuild -f -w node-pty",
-    "dist": "npm run build && electron-builder --config electron-builder.yml"
+    "dist": "npm run build && electron-builder --config electron-builder.yml",
+    "dist:local": "npm run build && electron-builder --config electron-builder.yml --config.win.signAndEditExecutable=false"
   },
   "dependencies": {
     "dotenv": "^16.4.5",
@@ -54,8 +55,9 @@
     "@vitejs/plugin-react": "^4.3.1",
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/xterm": "^5.5.0",
-    "electron": "^31.0.0",
+    "electron": "44.4.3",
     "electron-builder": "^24.13.3",
+    "playwright": "^1.63.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "typescript": "^5.4.5",

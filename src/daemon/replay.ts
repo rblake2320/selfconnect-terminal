@@ -11,7 +11,8 @@ import { checkpointMessage } from './ledger-checkpoints';
 
 /**
  * Session flight-recorder bundles (Section B). A `.screplay` is a signed,
- * self-contained record of one session's ledger slice plus the checkpoint
+ * self-contained record of a continuous global ledger range spanning the
+ * selected session (including interleaved sessions) plus the checkpoint
  * signatures and public keys needed to verify it offline. `replay verify`
  * recomputes the hash chain over the events, checks every checkpoint signature
  * against its sealed entry, and verifies the bundle's own signature — so a

@@ -5,6 +5,10 @@ import { ApprovalsPanel } from './ApprovalsPanel';
 import { ReviewMascot } from './widgets/ReviewMascot';
 import { ReplayPanel } from './widgets/ReplayPanel';
 import { LabPanel } from './widgets/LabPanel';
+import { JevPanel } from './widgets/JevPanel';
+import { AppCommands } from './widgets/AppCommands';
+import { HistoryPanel } from './widgets/HistoryPanel';
+import { NativeMeshPanel } from './widgets/NativeMeshPanel';
 import {
   CostKernelWidget,
   ContextGaugeWidget,
@@ -14,7 +18,6 @@ import {
   LedgerStatusWidget,
   PermissionModeWidget,
   TodoWidget,
-  SessionsWidget,
 } from './widgets/DockWidgets';
 
 const POLL_MS = 1500;
@@ -77,14 +80,6 @@ export function App(): React.JSX.Element {
     setState(await window.selfconnect.setPermissionMode(mode));
   }, []);
 
-  const onResumeSession = useCallback(
-    async (sessionId: string) => {
-      await window.selfconnect.resumeSession(sessionId);
-      await refresh();
-    },
-    [refresh],
-  );
-
   return (
     <div className="app">
       <header className="topbar">
@@ -105,6 +100,7 @@ export function App(): React.JSX.Element {
       <div className="main">
         <section className="terminal-pane">
           <TerminalView />
+          <AppCommands />
           {showFeed && (
             <div className="event-feed">
               {feed.map((e) => {
@@ -135,6 +131,8 @@ export function App(): React.JSX.Element {
         <aside className="dock">
           {state && (
             <>
+              <JevPanel localOnly={state.localOnly} sessionId={state.identity.sessionId} onLocalOnly={onToggleLocalOnly} />
+              <NativeMeshPanel />
               <CostKernelWidget cost={state.cost} />
               <ContextGaugeWidget context={state.context} />
               <ModelRouterWidget
@@ -147,7 +145,7 @@ export function App(): React.JSX.Element {
               <AgentMeshWidget agents={state.agents} peers={state.peers} />
               <PermissionModeWidget mode={state.permissionMode} onSet={onSetPermissionMode} />
               <TodoWidget todos={state.todos} />
-              <SessionsWidget sessions={state.sessions} onResume={onResumeSession} />
+              <HistoryPanel sessions={state.sessions} currentSessionId={state.identity.sessionId} />
               <ReplayPanel />
               <LabPanel />
             </>

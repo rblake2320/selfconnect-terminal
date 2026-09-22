@@ -27,6 +27,7 @@ export type JsonRpcResponse = z.infer<typeof JsonRpcResponseSchema>;
 export interface RpcChannel {
   send(line: string): void;
   onMessage(handler: (line: string) => void): void;
+  onError?(handler: (error: Error) => void): void;
   close(): void;
 }
 

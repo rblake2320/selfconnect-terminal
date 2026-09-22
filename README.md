@@ -1,10 +1,37 @@
 # SelfConnect Terminal
 
-A **governed agent execution surface** — not a terminal wrapper. SelfConnect
-Terminal is an Electron + React + TypeScript application with a real PTY
-terminal, seven live instrument widgets, daemon-owned model routing, a cost
-kernel, human approval gates, secret redaction, a local-only safety mode, and a
-SHA‑256 hash‑chained audit ledger with tamper detection.
+A desktop terminal for everyday shell and CLI-agent work, with an on-demand
+Jev assistant and saved history. Jev reads a previewed, redacted excerpt and
+suggests a check; it does not execute commands or approve work.
+
+**BPC and TSK are independent projects, not SelfConnect.** This repository's
+legacy `BpcEnvelope` and `TskTransport` names identify its own mailbox format;
+they do not mean those protocol projects are integrated.
+
+The interactive shell runs your commands directly. Permission modes, approvals,
+and ledger gates apply to the daemon tool API, not arbitrary commands typed
+into the shell or external CLI agents. Local-only controls daemon cloud calls;
+it is not a firewall for your shell.
+
+### Daily use with Jev
+
+Launch SelfConnect Terminal, work in the main terminal, and use **Preview recent
+output** when you want help interpreting a failure or waiting prompt. Inspect
+the excerpt, enable cloud assistance if desired, and click **Send shown output
+to Jev**. Only that excerpt is sent to TypeSafe. Confidence is a model estimate,
+not independent verification. There is no background polling of Jev.
+
+Keys remain in the main process. On Windows, `scripts/import-jev-key.py` imports
+the owner's selected workbook cell into a user-bound DPAPI file under AppData;
+neither the renderer nor the child shell receives the key. Settings and saved
+sessions also live under AppData, independent of the install directory.
+
+**View history** opens saved output without changing the active shell. It cannot
+resurrect a closed CLI-agent process. SelfConnect commands have a separate field;
+URLs and agent commands such as `/help` pass straight through the main terminal.
+
+See [verified outcomes and retained-evidence index](docs/verification/2026-09-22/README.md)
+and the [daily-use guide](docs/DAILY_USE.md).
 
 > The renderer is untrusted UI. The **daemon** (Electron main process) owns shell
 > access, provider keys, model calls, policy, approvals, redaction, identity, and
@@ -21,8 +48,8 @@ hash-chained ledger. Keys stay daemon-only; the renderer stays untrusted.
 
 - **Session persistence + resume** — daemon snapshots (cost, context, sentinel,
   todos, scrollback) are written atomically per session. Resume continues under
-  the **same `sessionId` with a new `runId`**, replays the ledger, and repaints
-  terminal scrollback. See the **Sessions** widget.
+  the **same `sessionId` with a new `runId`** through the headless API. The desktop
+  **Sessions** widget offers read-only history; it does not restore a process.
 - **Slash commands** — a daemon-side interceptor handles `/help`, `/sessions`,
   `/resume`, `/review`, `/local-only`, `/verify`, `/approvals`, `/approve`,
   `/deny`, `/cost`, `/agents`, `/mcp`, `/a2a`, `/redact-test`, `/clear`,
@@ -38,9 +65,10 @@ hash-chained ledger. Keys stay daemon-only; the renderer stays untrusted.
 - **Headless CLI + typed SDK** — the `selfconnect` bin and `SelfConnectClient`
   drive the *same* governed daemon core headlessly. Exports map: `.` (SDK),
   `./contracts`, `./cli`.
-- **Live A2A transport (BPC/TSK)** — per-peer SHA-256 hash-chained envelopes
+- **Legacy terminal mailbox** — per-peer SHA-256 hash-chained envelopes
   (`{bpc,id,from,to,ts,kind,payload,prevHash,hash}`) over a file mailbox or
-  WebSocket backend (`SELFCONNECT_A2A_MODE=file|ws|off`). Outbound payloads are
+  WebSocket listener (`SELFCONNECT_A2A_MODE=file|ws|off`). WebSocket outbound
+  dialing is unavailable and reports an error instead of claiming delivery. Outbound payloads are
   **always redacted**; sending to a non-allowlisted peer or any `handoff` kind
   requires **approval**. Inbound chain breaks raise a HIGH finding.
 - **Governed Tool Layer** — a daemon-owned `ToolRegistry` with Claude Code
@@ -111,7 +139,7 @@ and detached signatures (hex) ever cross a boundary. The renderer stays
 untrusted.
 
 - **Agent identity keys (B2.1)** — an Ed25519 keypair per `agentId`, minted on
-  first use in the daemon keystore. Outbound A2A (BPC) envelopes are signed; a
+  first use in the daemon keystore. Outbound legacy mailbox envelopes are signed; a
   bad signature on receive is a `risk.detected` (high) and the envelope is
   rejected. The signature is **excluded** from the envelope hash so the chain
   and the signature are independent checks.
@@ -284,7 +312,7 @@ to one hash-chained audit ledger.
 | `src/daemon/command-risk.ts` | Risky-command detection. |
 | `src/daemon/context-builder.ts` | Review snapshot (cwd, shell, terminal, git, docs). |
 | `src/daemon/pty-manager.ts` | The **only** importer of node-pty (lazy, isolated). |
-| `src/daemon/adapters/*` | BPC envelope, TSK transport, Sentinel export (future hooks). |
+| `src/daemon/adapters/*` | Legacy mailbox envelope and transport; no independent BPC/TSK integration. |
 | `src/agent/model-router.ts` | Provider/model selection + routing reason. |
 | `src/agent/provider-registry.ts` | Builds providers from daemon config. |
 | `src/agent/cost-kernel.ts` | Estimated vs verified tokens, session/avoided spend. |
@@ -337,7 +365,7 @@ checkpointed (writers) → audited to the hash-chained ledger.
 | `bash` | ✅ | ✅ | ✔ | runs through the governed PTY; **always approval-gated** |
 | `web_fetch` | ✅ | ✅ | – | outbound text redacted, audited |
 | `web_search` | ✅ | ✅ | – | cloud — blocked in local-only |
-| `task` | ✅ | ✅ | – | scoped sub-agent (own identity + tool allowlist) |
+| `task` | ✅ | ✅ | – | unavailable executor; returns an explicit error, no task launched |
 | `ask_user` | ✅ | ✅ | – | routed through the approvals panel |
 | `todo_write` / `todo_read` | ✅ | ✅ | ✔ / – | persisted in the session snapshot |
 | memory (`memory_read` / `memory_write`) | ✅ (CLAUDE.md) | ✅ (`SELFCONNECT.md`) | – / ✔ | project memory |
@@ -399,7 +427,7 @@ Provider keys are read from the daemon `.env` only and are never printed.
 5. **Security Sentinel** (dock) — redaction counts, risky-command findings,
    high/critical totals; emits `risk.detected`.
 6. **Agent Mesh** (dock) — spawned agents, runs, blocked-on-approval state;
-   future BPC/TSK hooks.
+   future independent protocol adapters.
 7. **Ledger Status** (status bar) — entry count, last hash tail, OK/BROKEN status,
    and a Verify button.
 

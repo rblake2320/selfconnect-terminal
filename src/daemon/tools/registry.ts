@@ -16,6 +16,7 @@ import { simulateTool } from './simulate';
 import type { GovernedTool, ToolContext, ToolServices } from './types';
 
 export interface ToolRegistryDeps {
+  integrity?: () => boolean;
   checkpoints: CheckpointStore;
   hooks: HookEngine;
   services: ToolServices;
@@ -126,6 +127,7 @@ export class ToolRegistry {
     allowed?: string[],
     options: InvokeOptions = {},
   ): Promise<ToolResult> {
+    if (this.deps.integrity && !this.deps.integrity()) return { ok:false, tool:name, output:'', blocked:true, blockReason:'Ledger integrity failed; tool execution is blocked.' };
     const tool = this.tools.get(name);
     const identity = this.deps.stampFor(agent, options.runId);
     if (!tool) {
@@ -239,6 +241,8 @@ export class ToolRegistry {
 
     let output: string;
     try {
+      if (this.deps.integrity && !this.deps.integrity()) throw new Error('Ledger integrity failed before execution.');
+      if (tool.mutating && this.deps.permissionMode() === 'plan') throw new Error('Plan mode blocks mutation.');
       output = await tool.run(input, ctx);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

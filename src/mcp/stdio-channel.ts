@@ -9,16 +9,25 @@ import type { McpServerConfig } from './config';
 export class StdioChannel implements RpcChannel {
   private child: ChildProcessWithoutNullStreams;
   private handlers: ((line: string) => void)[] = [];
+  private errors: ((error: Error) => void)[] = [];
+  private failure: Error | null = null;
 
   constructor(cfg: McpServerConfig) {
     this.child = spawn(cfg.command, cfg.args ?? [], {
       env: { ...process.env, ...(cfg.env ?? {}) },
       stdio: ['pipe', 'pipe', 'pipe'],
+      windowsHide: true,
     });
+    const fail=(message:string)=>{if(this.failure)return;this.failure=new Error(message);for(const h of this.errors)h(this.failure);};
+    this.child.on('error',()=>fail('MCP server process could not start. Check its command and configuration.'));
+    this.child.on('exit',(code)=>fail(`MCP server exited (${code}).`));
+    this.child.stdin.on('error',()=>fail('MCP server input pipe closed.'));
+    this.child.stderr.resume();
     let buf = '';
     this.child.stdout.setEncoding('utf8');
     this.child.stdout.on('data', (chunk: string) => {
       buf += chunk;
+      if(buf.length>1024*1024){fail('MCP server response exceeded 1 MiB.');this.child.kill();return;}
       let idx: number;
       while ((idx = buf.indexOf('\n')) >= 0) {
         const line = buf.slice(0, idx);
@@ -29,12 +38,14 @@ export class StdioChannel implements RpcChannel {
   }
 
   send(line: string): void {
+    if(this.failure)throw this.failure;
     this.child.stdin.write(line.endsWith('\n') ? line : line + '\n');
   }
 
   onMessage(handler: (line: string) => void): void {
     this.handlers.push(handler);
   }
+  onError(handler: (error:Error)=>void): void { this.errors.push(handler);if(this.failure)handler(this.failure); }
 
   close(): void {
     try {

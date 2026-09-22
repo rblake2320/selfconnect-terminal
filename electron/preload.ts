@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type { SelfConnectApi } from './ipc-contract';
+import type { JevSnapshot, JevAnalysis } from '../src/shared/jev';
 import type {
   BusEvent,
   ReviewResult,
@@ -24,6 +25,8 @@ import type {
  * (a test asserts this).
  */
 const IPC = {
+  jevPreview: 'jev:preview',
+  jevAnalyze: 'jev:analyze',
   ptyInput: 'pty:input',
   ptyResize: 'pty:resize',
   reviewRun: 'review:run',
@@ -35,6 +38,8 @@ const IPC = {
   permissionModeSet: 'permission:set',
   sessionsList: 'sessions:list',
   sessionResume: 'session:resume',
+  nativeMesh: 'native:mesh',
+  sessionHistory: 'session:history',
   replayEvents: 'replay:events',
   labLatest: 'lab:latest',
   clipboardRead: 'clipboard:read',
@@ -49,6 +54,9 @@ const IPC = {
  * renderer — just these functions.
  */
 const api: SelfConnectApi = {
+  nativeMesh(join: boolean) { return ipcRenderer.invoke(IPC.nativeMesh, {join}); },
+  jevPreview(): Promise<JevSnapshot> { return ipcRenderer.invoke(IPC.jevPreview) as Promise<JevSnapshot>; },
+  jevAnalyze(snapshotId: string): Promise<JevAnalysis> { return ipcRenderer.invoke(IPC.jevAnalyze, { snapshotId, approved: true }) as Promise<JevAnalysis>; },
   ptyInput(data: string): void {
     ipcRenderer.send(IPC.ptyInput, { data });
   },
@@ -78,6 +86,9 @@ const api: SelfConnectApi = {
   },
   listSessions(): Promise<SessionSummary[]> {
     return ipcRenderer.invoke(IPC.sessionsList) as Promise<SessionSummary[]>;
+  },
+  sessionHistory(sessionId: string): Promise<{sessionId:string;capturedAt:number;scrollback:string[]}> {
+    return ipcRenderer.invoke(IPC.sessionHistory, {sessionId});
   },
   resumeSession(sessionId: string): Promise<ResumeResult> {
     return ipcRenderer.invoke(IPC.sessionResume, { sessionId }) as Promise<ResumeResult>;

@@ -10,7 +10,8 @@ import { BpcEnvelopeSchema, type BpcEnvelope } from '../../shared/contracts';
 import { verifyEnvelope } from './bpc-envelope';
 
 /**
- * TSK (Transport for SelfConnect Kit) — moves BPC envelopes between agents.
+ * Legacy terminal mailbox adapter. The Tsk name is retained for compatibility;
+ * this is not an integration of the independent TSK protocol project.
  * Two interchangeable backends:
  *   - file: per-peer mailbox (<dir>/<peer>/{inbox,outbox}.jsonl), matching the
  *     user's existing file-based protocol style; polled + fs.watch where avail.
@@ -184,8 +185,7 @@ export class WebSocketTskTransport implements TskTransport {
 
   async send(env: BpcEnvelope): Promise<void> {
     if (!verifyEnvelope(env)) throw new Error('TSK rejected envelope: hash mismatch');
-    // Live dialing of peers is out of scope for the headless build; the
-    // listener side is what the spec exercises. Envelopes are still validated.
+    throw new Error('WebSocket peer dialing is not configured. No message was sent.');
   }
 
   async receive(): Promise<BpcEnvelope[]> {

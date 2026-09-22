@@ -17,24 +17,24 @@ receiver's own context already holds its side, and **nobody re-reads a shared lo
 sessions run on subscription and local models (Ollama/gemma3 on the 5090) cost $0 — so a whole
 conversation can run at near-zero marginal credit burn. *You read only what matters to you.*
 
-## The SelfConnect talk loop — type in AND read back (this is the whole point)
-SelfConnect is a **round-trip**, not a one-way send. Two tools in `bridge/`:
-- **`sc-inject.ps1`** — type a message into another window (SEND). `-Enter` submits after typing.
-- **`sc-read.ps1`** — capture a window to a PNG so you can READ its reply (RECEIVE).
+## The guarded SelfConnect talk loop
+
+Use the installed Python Core to enumerate and verify HWND, PID, executable,
+class and title before sending. For Electron SCT targets, use:
 
 ```powershell
-Get-Process | ? { $_.MainWindowTitle } | select Id, MainWindowTitle              # find the peer window
-pwsh -File bridge\sc-inject.ps1 -WindowTitle "<peer>" -Message "your message" -Enter   # type + send
-pwsh -File bridge\sc-read.ps1   -WindowTitle "<peer>" -OutFile bridge\reply.png        # read back
+python -m sc_cli windows --json
+python scripts/selfconnect-peer.py --hwnd <hwnd> --pid <pid> --text "message" --submit
+python -m sc_cli read --hwnd <hwnd>
 ```
-Then open `bridge\reply.png` with your **Read** tool. The loop is
-**inject → wait → Enter (a separate keystroke, never glued to the text) → read → reason → repeat.**
-That is *having a talk*, not just typing at something. Caveat: some chat boxes treat Enter as a
-newline and need a Submit button clicked instead of `-Enter` (omit it, then click the send control).
 
-**Simplest on-box channel (no injection needed):** read inbound `bridge/orchestrator-to-inner.md`,
-append your replies to `bridge/inner-to-orchestrator.md`; a one-line CLI inbox is
-`bridge/orchestrator-cli.log` (prefix lines with `inner>`).
+The adapter serializes foreground input and checks identity. A successful send
+receipt means input acceptance, not delivery: require the recipient's ACK or
+conversation readback. Do not use the old title-only SendKeys bridge when
+coordinating agents; concurrent native input caused an observed collision.
+Native mesh presence and app-internal roles are separate. Terminal history is
+saved output; restarting an agent requires explicit CLI resume. See the
+[verified collaboration and crash outcomes](docs/verification/2026-09-22/README.md).
 
 **Deep reference (not auto-loaded — read when you need depth):** `docs/TERMINAL-TO-TERMINAL.md`
 (full wiring) and `docs/INVENTION-DISCLOSURE.md` (claims). Only `CLAUDE.md` auto-loads, so this
@@ -42,9 +42,11 @@ file stays lean and links the rest.
 
 ## Keep these three mechanisms distinct (do not blur — it matters for the patent record)
 - **SelfConnect = injection** (this file). Terminal-as-medium. The *core* mechanism.
-- **A2A = the app's signed BPC/TSK mailbox** — `inbox.jsonl` / `outbox.jsonl` under
+- **A2A = the app's legacy signed mailbox** — `inbox.jsonl` / `outbox.jsonl` under
   `SELFCONNECT_A2A_DIR`, hash-chained through the ledger's `record()`. Separate, governed
   transport for the enterprise tier. Not the same thing as injection.
+- **BPC and TSK are independent protocol projects.** Legacy type names in this
+  repository are not implementations or integrations of those projects.
 - **MCP = read-only governed tools** (`ledger_verify`, `ledger_query`, `cost_report`, …) —
   request/response, for proofs; not peer messaging.
 
@@ -55,7 +57,7 @@ Just prove the AI-to-AI loop works, cheaply and across substrates.
 
 ## Tracking findings — how to find out, and how to log
 Bugs, limitations, and notable findings go in the **GitHub issue tracker** so the whole mesh
-sees them and nobody re-diagnoses the same thing. This repo is private; `gh` is authed as
+sees them and nobody re-diagnoses the same thing. This repository is public; do not post secrets or private transcripts. `gh` is authed as
 `rblake2320`.
 - **Find out what's already known — do this before deep-diagnosing anything:**
   `gh issue list`  then  `gh issue view 1`  (issue #1 is the running live-testing tracker).

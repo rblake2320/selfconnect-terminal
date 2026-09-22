@@ -16,8 +16,9 @@ export class McpClient {
   private pending = new Map<number | string, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
   private buffer = '';
 
-  constructor(private readonly channel: RpcChannel) {
+  constructor(private readonly channel: RpcChannel, private readonly timeoutMs = 15000) {
     channel.onMessage((line) => this.onLine(line));
+    channel.onError?.(error=>{for(const p of this.pending.values())p.reject(error);this.pending.clear();});
   }
 
   private onLine(chunk: string): void {
@@ -59,34 +60,42 @@ export class McpClient {
   private request<T>(method: string, params?: unknown): Promise<T> {
     const id = this.nextId++;
     return new Promise<T>((resolve, reject) => {
-      this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject });
-      this.channel.send(encode({ jsonrpc: '2.0', id, method, params }));
+      const timer=setTimeout(()=>{this.pending.delete(id);reject(new Error(`MCP ${method} timed out after ${this.timeoutMs}ms`));},this.timeoutMs);
+      this.pending.set(id, { resolve: value=>{clearTimeout(timer);resolve(value as T);}, reject:error=>{clearTimeout(timer);reject(error);} });
+      try{this.channel.send(encode({ jsonrpc: '2.0', id, method, params }));}
+      catch(error){this.pending.delete(id);clearTimeout(timer);reject(error);}
     });
   }
 
   async initialize(): Promise<unknown> {
-    return this.request('initialize', {
+    const result=await this.request('initialize', {
       protocolVersion: '2024-11-05',
       clientInfo: { name: 'selfconnect-client', version: '2.0.0' },
       capabilities: {},
     });
+    this.channel.send(JSON.stringify({jsonrpc:'2.0',method:'notifications/initialized'})+'\n');
+    return result;
   }
 
   async listTools(): Promise<McpTool[]> {
-    const res = (await this.request<{ tools: McpTool[] }>('tools/list')) ?? { tools: [] };
-    return res.tools ?? [];
+    const res = await this.request<{ tools: McpTool[] }>('tools/list');
+    if(!res||!Array.isArray(res.tools))throw new Error('MCP returned an invalid tools list.');
+    return res.tools;
   }
 
   async callTool(name: string, args: unknown): Promise<string> {
-    const res = await this.request<{ content?: { type: string; text?: string }[] }>('tools/call', {
+    const res = await this.request<{ isError?:boolean;content?: { type: string; text?: string }[] }>('tools/call', {
       name,
       arguments: args,
     });
     const parts = res?.content ?? [];
+    if(res?.isError)throw new Error(parts.map(p=>p.text??'').join('')||'MCP tool reported an error.');
     return parts.map((p) => p.text ?? '').join('');
   }
 
   close(): void {
+    for(const p of this.pending.values())p.reject(new Error('MCP client closed.'));
+    this.pending.clear();
     this.channel.close();
   }
 }

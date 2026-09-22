@@ -4,7 +4,14 @@
  * renderer. The renderer receives only derived, non-secret state.
  */
 
+import { join } from 'node:path';
+import { homedir } from 'node:os';
+
 export interface DaemonConfig {
+  jevApiKey: string;
+  jevKeyFile: string;
+  jevModel: string;
+  jevTimeoutMs: number;
   localOnly: boolean;
   ledgerPath: string;
   maxSpendPerCallUsd: number;
@@ -59,6 +66,10 @@ function bool(value: string | undefined, fallback: boolean): boolean {
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): DaemonConfig {
   return {
+    jevApiKey: env.JEV_API_KEY || '',
+    jevKeyFile: env.SELFCONNECT_JEV_KEY_FILE || join(env.APPDATA || join(homedir(), '.config'), 'SelfConnect Terminal', 'jev-key.dpapi'),
+    jevModel: env.JEV_MODEL || 'jev-latest',
+    jevTimeoutMs: Math.min(30000, Math.max(1000, num(env.JEV_TIMEOUT_MS, 15000))),
     localOnly: bool(env.SELFCONNECT_LOCAL_ONLY, true),
     ledgerPath: env.SELFCONNECT_LEDGER_PATH || './data/selfconnect-ledger.jsonl',
     maxSpendPerCallUsd: num(env.SELFCONNECT_MAX_SPEND_PER_CALL, 0.25),
