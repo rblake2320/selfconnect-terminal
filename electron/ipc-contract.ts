@@ -20,6 +20,7 @@ import type {
  * which are Zod-validated on the daemon side before doing anything.
  */
 export interface SelfConnectApi {
+  computerUse(command: unknown): Promise<unknown>;
   nativeMesh(join: boolean): Promise<NativeMeshState>;
   jevPreview(): Promise<JevSnapshot>;
   jevAnalyze(snapshotId: string): Promise<JevAnalysis>;

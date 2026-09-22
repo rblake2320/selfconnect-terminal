@@ -28,6 +28,7 @@ export type Identity = z.infer<typeof IdentitySchema>;
  * material, governed event and must be identity-stamped + ledgered.
  */
 export const EventTypeSchema = z.enum([
+  'computer_use.model.requested','computer_use.model.result','computer_use.session.approved','computer_use.session.terminated','computer_use.action.validated','computer_use.action.executed','computer_use.observation.captured','computer_use.state.verified',
   'jev.requested',
   'jev.result',
   'terminal.output',
@@ -429,6 +430,7 @@ export type ResumeResult = z.infer<typeof ResumeResultSchema>;
 // ---------------------------------------------------------------------------
 
 export const IPC = {
+  computerUse:'computer:use',
   jevPreview: 'jev:preview',
   jevAnalyze: 'jev:analyze',
   // renderer -> main (invoke)

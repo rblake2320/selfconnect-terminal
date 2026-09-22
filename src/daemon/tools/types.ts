@@ -1,5 +1,5 @@
 import type { z } from 'zod';
-import type { Identity, PermissionMode, RiskSeverity } from '../../shared/contracts';
+import type { Identity, PermissionMode, RiskSeverity, SimulationPreview } from '../../shared/contracts';
 
 /**
  * A governed tool. Every tool declares whether it mutates state and/or is
@@ -19,6 +19,8 @@ export interface GovernedTool<I = unknown> {
   /** Writers whose paths should be checkpointed before mutation. */
   checkpointPaths?: (input: I) => string[];
   inputSchema: z.ZodType<I>;
+  /** Side-effect-free approval details, resolved against current session state. */
+  preview?: (input:I)=>SimulationPreview;
   run(input: I, ctx: ToolContext): Promise<string> | string;
 }
 

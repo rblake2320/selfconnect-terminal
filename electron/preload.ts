@@ -25,6 +25,7 @@ import type {
  * (a test asserts this).
  */
 const IPC = {
+  computerUse:'computer:use',
   jevPreview: 'jev:preview',
   jevAnalyze: 'jev:analyze',
   ptyInput: 'pty:input',
@@ -54,6 +55,7 @@ const IPC = {
  * renderer — just these functions.
  */
 const api: SelfConnectApi = {
+  computerUse(command:unknown){return ipcRenderer.invoke(IPC.computerUse,command);},
   nativeMesh(join: boolean) { return ipcRenderer.invoke(IPC.nativeMesh, {join}); },
   jevPreview(): Promise<JevSnapshot> { return ipcRenderer.invoke(IPC.jevPreview) as Promise<JevSnapshot>; },
   jevAnalyze(snapshotId: string): Promise<JevAnalysis> { return ipcRenderer.invoke(IPC.jevAnalyze, { snapshotId, approved: true }) as Promise<JevAnalysis>; },

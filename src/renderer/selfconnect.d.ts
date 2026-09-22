@@ -18,6 +18,7 @@ import type {
  * electron/ipc-contract.ts SelfConnectApi (which lives in the daemon tsconfig).
  */
 export interface SelfConnectApi {
+  computerUse(command: unknown): Promise<unknown>;
   nativeMesh(join: boolean): Promise<NativeMeshState>;
   jevPreview(): Promise<JevSnapshot>;
   jevAnalyze(snapshotId: string): Promise<JevAnalysis>;

@@ -19,3 +19,5 @@ bridge/sc-hwnd.ps1
 
 # Reproducible browser preview build output
 dist-preview/
+__pycache__/
+*.pyc

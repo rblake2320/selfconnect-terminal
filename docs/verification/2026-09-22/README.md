@@ -125,3 +125,7 @@ one live Jev check. Both dedicated live-API harnesses reject execution before
 startup without explicit opt-in; project instructions prohibit enabling that
 opt-in under the current policy. Existing CLI subscriptions remain the intended
 agent path. The computer-use proposal is subject to this restriction too.
+
+## Later desktop-assist implementation
+
+[Desktop-assist results](computer-use.md) record the subsequent 368-test source gate, installed native-input checks, billing controls, and retained corrections. Earlier results above describe their original builds.

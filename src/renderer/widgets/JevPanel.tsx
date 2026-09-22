@@ -11,6 +11,7 @@ export function JevPanel({localOnly, sessionId, onLocalOnly}: {localOnly:boolean
   return <section className="widget jev-panel" aria-label="Jev assistant">
     <div className="jev-heading"><h2>Jev assistant</h2><span className="jev-tag">On demand</span></div>
     <p className="muted">Understand an error, spot a waiting prompt, or choose your next check.</p>
+    <p className="muted">Jev uses a separately billed API, not your CLI subscription. Its charges are not included in App call accounting. Preview is local; sending may incur charges.</p>
     {localOnly && <div className="jev-notice">Local-only mode is on. <button className="btn" onClick={()=>void onLocalOnly(false).catch(e=>setError(e.message))}>Enable cloud assistance</button></div>}
     <button className="btn jev-primary" disabled={busy} onClick={()=>void preview()}>Preview recent output</button>
     {snapshot && <>

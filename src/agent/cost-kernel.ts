@@ -201,6 +201,13 @@ export class CostKernel {
     this.last = estimate;
   }
 
+  /** Separately billed desktop usage; uncertain sends retain their reservation. */
+  recordExternal(costUsd: number, uncertain: boolean, usage?: {inputTokens:number;outputTokens:number}): void {
+    if (!Number.isFinite(costUsd) || costUsd < 0) throw new Error('Invalid external cost');
+    this.sessionSpendUsd += costUsd;
+    this.last = {kind:uncertain?'ESTIMATED':'VERIFIED',inputTokens:usage?.inputTokens??0,outputTokens:usage?.outputTokens??0,costUsd,avoidedUsd:0};
+  }
+
   /** Restore cumulative totals from a persisted snapshot (session resume). */
   restore(snapshot: CostSnapshot): void {
     this.sessionSpendUsd = snapshot.sessionSpendUsd;

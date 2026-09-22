@@ -1365,6 +1365,7 @@ export function createMockBridge(): SelfConnectApi {
     async listSessions(): Promise<SessionSummary[]> {
       return sim.sessions;
     },
+    async computerUse(): Promise<never>{throw Error('Desktop executor requires the installed app.');},
     async nativeMesh(): Promise<never> { throw new Error('Native mesh requires the desktop app.'); },
     async sessionHistory(): Promise<{sessionId:string;capturedAt:number;scrollback:string[]}> { throw new Error('Saved terminal history requires the desktop app.'); },
     async resumeSession(sessionId: string): Promise<ResumeResult> {

@@ -26,3 +26,5 @@ export async function nativeMeshState(self:NativeMeshState['self'],join=false):P
  }
  return {self,peers,registered,observedAt:Date.now()};
 }
+
+export async function nativeWindows(){return z.array(windowSchema).parse(await python(['-m','sc_cli','windows','--json','--limit','200']));}

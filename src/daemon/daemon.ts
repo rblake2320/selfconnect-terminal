@@ -1,3 +1,4 @@
+import { ComputerUseController, ComputerToolInputSchema } from './computer-use';
 import {
   type BusEvent,
   type Identity,
@@ -97,6 +98,14 @@ import { loadLimits } from './limits';
  * the hash-chained ledger (one bus, one audit path).
  */
 export class Daemon {
+  private desktop?: ComputerUseController;
+  configureComputerUse(driver:string,evidence:string,approvalWindow=0):void { if(!this.desktop)this.desktop=new ComputerUseController(driver,evidence,(phase,payload)=>this.record(('computer_use.'+phase) as BusEvent['type'],payload,'system'),approvalWindow,{enabled:this.cfg.computerPaidEnabled===true,apiKey:this.cfg.anthropicApiKey,billingFile:this.cfg.computerBillingFile!,localOnly:()=>this.policy.localOnly,perCallCapUsd:this.cfg.maxSpendPerCallUsd,onCharge:(amount,uncertain,usage)=>{this.cost.recordExternal(amount,uncertain,usage);this.record('cost.update',this.cost.snapshot(),'system');}}); }
+  computerSessions(){return this.desktop?.list()??[];}
+  computerStop(id:string){if(!this.desktop)throw Error('Desktop executor unavailable');return this.desktop.stop(id);}
+  computerImage(id:string){if(!this.desktop)throw Error('Desktop executor unavailable');return this.desktop.image(id);}
+  computerClose(){this.desktop?.close();}
+  async computerInvoke(input:unknown){return this.tools.invoke('computer_use',input,'system');}
+
   readonly cfg: DaemonConfig;
   readonly jev: JevAssistant;
   private jevSnapshots = new Map<string, JevSnapshot>();
@@ -211,6 +220,14 @@ export class Daemon {
       confidenceRouter: (input) =>
         routeConfidence({ ...input, threshold: this.cfg.confidenceThreshold }),
     });
+
+    this.tools.register({name:'computer_use',description:'Governed desktop operations. Paid proposals require separate explicit consent.',mutating:true,readOnly:false,risk:'high',inputSchema:ComputerToolInputSchema,preview:(raw)=>{
+      const i=ComputerToolInputSchema.parse(raw);
+      const session=i.operation==='start'?undefined:this.desktop?.list().find(s=>s.id===(i.operation==='act'?i.action.sessionId:i.sessionId));
+      const target=i.operation==='start'?i.request.target:session?.request.target;
+      const paid=i.operation==='propose';
+      return {tool:'computer_use',mutating:true,risk:'high',summary:paid?'SEPARATE API BILL: sends this window screenshot to Anthropic. Not included in your subscription. Approval sends ONE request; no action executes.':'Approve only this desktop operation. No model API request.',filesTouched:[],diff:JSON.stringify({target,operation:i,...(paid?{billingConsent:session?.request.paidConsent,committedUsd:session?.paidSpendUsd,requestCapUsd:i.maxChargeUsd}: {})},null,2),estimatedCostUsd:paid?i.maxChargeUsd:0};
+    },run:async(raw)=>{if(!this.desktop)throw Error('Desktop executor unavailable');const i=ComputerToolInputSchema.parse(raw);return JSON.stringify(i.operation==='start'?await this.desktop.start(i.request):i.operation==='act'?await this.desktop.act(i.action):await this.desktop.propose(i.sessionId,i.observationId,i.maxChargeUsd));}});
 
     // Register the core agents in the mesh.
     this.mesh.register(this.identity.agent('shell'), 'shell', false);
@@ -860,12 +877,13 @@ export class Daemon {
   }
 
   private async gateToolApproval(summary: string, preview?: SimulationPreview): Promise<boolean> {
+    const paidDesktop = preview?.tool === 'computer_use' && preview.estimatedCostUsd > 0;
     const { promise } = this.approvals.request({
       kind: 'cloud-send',
       summary,
-      provider: 'ollama',
-      model: 'tool',
-      estimatedCostUsd: 0,
+      provider: paidDesktop ? 'anthropic' : 'ollama',
+      model: paidDesktop ? 'computer-use API (see session consent)' : 'tool',
+      estimatedCostUsd: preview?.estimatedCostUsd ?? 0,
       preview,
     });
     const status = await promise;
